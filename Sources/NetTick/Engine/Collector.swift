@@ -163,16 +163,33 @@ final class Collector: @unchecked Sendable {   // 状态只在 queue 上改
         _ = dt
     }
 
-    /// 最近 3 秒各 App 的平均速率
+    /// 最近 3 秒各 App 的平均速率；网卡比各 App 明显多出一截时补一行「其他」
     private func computeActive(now: Date) {
         let sec = Int(now.timeIntervalSince1970)
-        secondBuckets = secondBuckets.filter { $0.key > sec - 3 }
-        var sum: [String: Bytes] = [:]
-        for (_, apps) in secondBuckets { for (k, b) in apps { sum[k, default: Bytes()] += b } }
-        active = sum.compactMap { key, b in
+        secondBuckets = secondBuckets.filter { $0.key > sec - 6 }
+        func sum(_ window: Int) -> [String: Bytes] {
+            var out: [String: Bytes] = [:]
+            for (s, apps) in secondBuckets where s > sec - window { for (k, b) in apps { out[k, default: Bytes()] += b } }
+            return out
+        }
+        var rates = sum(3).compactMap { key, b -> AppRate? in
             guard let id = recorder.identities[key] else { return nil }
             return AppRate(identity: id, rx: Double(b.rx) / 3, tx: Double(b.tx) / 3)
-        }.sorted { $0.rx + $0.tx > $1.rx + $1.tx }
+        }
+        // 「其他」：root 等系统账户的进程（比如系统更新）在用网，看不到是谁；列出来免得菜单栏在跳、列表却是空的。
+        // 用 5 秒平均来比：网卡计数和各 App 的计数前后差一两秒，3 秒窗口里流量一起伏就对不齐，
+        // 只有 Chrome 在稳定下载时会冒出一行假的「其他」（2026-11-24 实测）。门槛：多出 10 KB/s 且占网卡三成以上
+        let recent = history.suffix(5)
+        if recent.count >= 3 {
+            let n = Double(recent.count)
+            let nicRx = Double(recent.reduce(0) { $0 + $1.rx }) / n, nicTx = Double(recent.reduce(0) { $0 + $1.tx }) / n
+            let apps5 = sum(5).values.reduce(Bytes()) { var x = $0; x += $1; return x }
+            let oRx = max(0, nicRx - Double(apps5.rx) / 5), oTx = max(0, nicTx - Double(apps5.tx) / 5)
+            if oRx + oTx >= 10_000, oRx + oTx >= 0.3 * (nicRx + nicTx) {
+                rates.append(AppRate(identity: .other, rx: oRx, tx: oTx))
+            }
+        }
+        active = rates.sorted { $0.rx + $0.tx > $1.rx + $1.tx }
     }
 
     /// 面板打开 / 关上时调用（任意线程）

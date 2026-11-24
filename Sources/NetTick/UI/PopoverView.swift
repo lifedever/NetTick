@@ -7,6 +7,10 @@ final class LiveModel: ObservableObject {
     /// 关着时也记下最新一份（不触发界面），打开那一刻先填上：高度一出来就是对的，不会先矮后高
     var latest = Collector.Live()
     var isVisible = false
+    /// 面板固定：点别处不收起（记住，下次打开还是固定的）
+    @Published var pinned = UserDefaults.standard.bool(forKey: "popoverPinned") {
+        didSet { UserDefaults.standard.set(pinned, forKey: "popoverPinned") }
+    }
 
     func receive(_ l: Collector.Live) {
         latest = l
@@ -144,6 +148,13 @@ struct PopoverView: View {
         HStack(spacing: 8) {
             Button("打开主窗口", action: onOpenMain)
             Spacer()
+            Button { model.pinned.toggle() } label: {
+                Image(systemName: model.pinned ? "pin.fill" : "pin")
+                    .foregroundStyle(model.pinned ? Color.accentColor : Color.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help(model.pinned ? "取消固定" : "固定后点别处不收起")
+            .accessibilityLabel(model.pinned ? "取消固定" : "固定面板")
             Button("设置", action: onOpenSettings).buttonStyle(.borderless).foregroundStyle(.secondary)
             Button("退出", action: onQuit).buttonStyle(.borderless).foregroundStyle(.secondary)
         }

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 /// 菜单栏：上下两行速率（上传在上、下载在下），点开是面板。
@@ -24,7 +25,11 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             button.action = #selector(toggle(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
-        popover.behavior = .transient
+        popover.behavior = live.pinned ? .applicationDefined : .transient
+        // 固定 = applicationDefined：点别处、切到别的 App 都不收起，只有再点菜单栏图标才收
+        pinObserver = live.$pinned.dropFirst().sink { [weak self] pinned in
+            self?.popover.behavior = pinned ? .applicationDefined : .transient
+        }
         popover.animates = true
         popover.delegate = self
         let host = NSHostingController(rootView: popoverContent)
@@ -45,6 +50,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 
     private var lastText = ""
+    private var pinObserver: AnyCancellable?
     private var lastRates: (up: Double, down: Double) = (0, 0)
 
     /// 设置里改了「显示箭头」：换一个画法、改宽度、立刻重画

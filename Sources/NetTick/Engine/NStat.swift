@@ -30,6 +30,7 @@ final class NStat {
     private typealias QueryFn = @convention(c) (Ref, @escaping @convention(block) () -> Void) -> Void
     private typealias DictBlockFn = @convention(c) (Ref, @escaping @convention(block) (CFDictionary) -> Void) -> Void
     private typealias VoidBlockFn = @convention(c) (Ref, @escaping @convention(block) () -> Void) -> Void
+    private typealias SourceQueryFn = @convention(c) (Ref) -> Void
 
     private let queue: DispatchQueue
     private var manager: Ref?
@@ -67,6 +68,7 @@ final class NStat {
               let queryAll = sym("NStatManagerQueryAllSources", QueryFn.self) else { return false }
         self.queryAll = queryAll
         self.queryDesc = sym("NStatManagerQueryAllSourcesDescriptions", QueryFn.self)
+        let querySourceDesc = sym("NStatSourceQueryDescription", SourceQueryFn.self)
 
         let mgr = create(kCFAllocatorDefault, queue) { [weak self] src, _ in
             guard let self else { return }
@@ -85,6 +87,10 @@ final class NStat {
             setRemoved(src) { [weak self] in
                 self?.onRemoved?(id)
             }
+            // 新连接一出现就单独要一次描述（属于哪个进程）。不要的话系统要等连接结束才给，
+            // 这期间它的字节没法记到 App 头上：「正在用网」是空的、按分钟的账也晚一截（2026-11-24 实测：
+            // 不要 4.8 秒 = 整条连接的寿命，要了 0.0 秒）。只要这一次，不是每轮全量要
+            querySourceDesc?(src)
         }
         guard let mgr else { log("NStatManagerCreate 返回空"); return false }
         manager = mgr
