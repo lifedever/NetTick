@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>NetTick</string>
+    <key>CFBundleDisplayName</key>
+    <string>NetTick</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.lifedever.NetTick</string>
+    <key>CFBundleExecutable</key>
+    <string>NetTick</string>
+    <key>CFBundleIconFile</key>
+    <string>NetTick</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <!-- 由 scripts/build-app.sh 注入 -->
+    <key>CFBundleShortVersionString</key>
+    <string>__VERSION__</string>
+    <key>CFBundleVersion</key>
+    <string>__BUILD__</string>
+    <!-- 没有 .lproj 时进程首选本地化会退成英文，App 名字（FileManager.displayName）就全是英文。
+         允许混合本地化后按系统语言取，排行里才显示「微信」而不是「WeChat」。 -->
+    <key>CFBundleDevelopmentRegion</key>
+    <string>zh-Hans</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>zh-Hans</string>
+    </array>
+    <key>CFBundleAllowMixedLocalizations</key>
+    <true/>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <!-- 只活在菜单栏：没有 Dock 图标，打开主窗口时临时切成 regular -->
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHumanReadableCopyright</key>
+    <string>© lifedever</string>
+</dict>
+</plist>

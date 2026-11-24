@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#eceef2"/></linearGradient>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.22"/></filter>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="9" flood-color="#0b1b3a" flood-opacity="0.18"/></filter>
+    <linearGradient id="wa" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a78d6" stop-opacity=".32"/><stop offset="1" stop-color="#2a78d6" stop-opacity="0"/></linearGradient><clipPath id="cp"><rect x="160" y="160" width="704" height="704" rx="140"/></clipPath>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)" filter="url(#sh)"/>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="184.5" fill="none" stroke="#000" stroke-opacity="0.08"/>
+  <g clip-path="url(#cp)">
+    <path d="M150 720 C250 720 300 470 400 470 S520 640 590 600 S700 330 800 360 S860 420 880 430 L880 880 L150 880 Z" fill="url(#wa)"/>
+    <path d="M150 720 C250 720 300 470 400 470 S520 640 590 600 S700 330 800 360 S860 420 880 430" fill="none" stroke="#2a78d6" stroke-width="44" stroke-linecap="round" stroke-linejoin="round" filter="url(#soft)"/>
+    <path d="M150 650 C240 650 300 610 380 618 S520 560 600 590 S730 520 880 540" fill="none" stroke="#eb6834" stroke-width="34" stroke-linecap="round" stroke-linejoin="round" filter="url(#soft)"/>
+  </g></svg>

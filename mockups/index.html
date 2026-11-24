@@ -1,0 +1,759 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NetTick 设计稿</title>
+<style>
+/* 设计稿只在本机 Chrome / 无头 Chrome 里看，light-dark() 不加兜底。
+   色板：下载 / 上传 / 走代理 三色已跑 dataviz 校验（两两区分通过；走代理的青绿在浅色上对比度 2.74，凡出现都配文字）。 */
+:root {
+  color-scheme: light dark;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+
+  --win-bg: light-dark(#ffffff, #1e1e1f);
+  --sidebar-bg: light-dark(rgba(236, 236, 239, .82), rgba(50, 50, 53, .78));
+  --panel-bg: light-dark(rgba(248, 248, 249, .9), rgba(38, 38, 40, .9));
+  --group-bg: light-dark(#ffffff, #2a2a2c);
+  --page-bg: light-dark(#f5f5f7, #2b2b2e);
+  --text-1: light-dark(#1d1d1f, #f2f2f4);
+  --text-2: light-dark(#6e6e73, #a1a1a6);
+  --text-3: light-dark(#8e8e93, #7c7c80);
+  --sep: light-dark(rgba(0, 0, 0, .09), rgba(255, 255, 255, .09));
+  --fill: light-dark(rgba(0, 0, 0, .05), rgba(255, 255, 255, .07));
+  --fill-strong: light-dark(rgba(0, 0, 0, .09), rgba(255, 255, 255, .13));
+  --seg-on: light-dark(#ffffff, #636366);
+  --select: light-dark(rgba(10, 110, 230, .12), rgba(70, 140, 255, .22));
+  --accent: light-dark(#0a6ee6, #3b8cff);
+  --switch-on: light-dark(#0a6ee6, #3b8cff);
+  --shadow: 0 24px 60px rgba(0, 0, 0, .28), 0 0 0 .5px rgba(0, 0, 0, .25);
+
+  /* 图表 */
+  --dl: light-dark(#2a78d6, #3987e5);
+  --ul: light-dark(#eb6834, #d95926);
+  --px: light-dark(#1baf7a, #199e70);
+  --track: light-dark(#e1e0d9, #3a3a38);
+  --grid: light-dark(#ecebe6, #2e2e2c);
+  --axis: light-dark(#c3c2b7, #48484a);
+  --chart-surface: light-dark(#ffffff, #1e1e1f);
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font: 13px/1.38 var(--font);
+  background: light-dark(#e9e9ec, #111);
+  color: var(--text-1);
+  -webkit-font-smoothing: antialiased;
+}
+.num { font-variant-numeric: tabular-nums; }
+
+/* ---------- 文档模式（总览页） ---------- */
+.doc-head { max-width: 1300px; margin: 32px auto 8px; padding: 0 24px; }
+.doc-head h1 { font-size: 22px; margin: 0 0 4px; }
+.doc-head p { margin: 0; color: var(--text-2); }
+.frame { max-width: 1300px; margin: 28px auto; padding: 0 24px; }
+.frame > .cap { margin: 0 0 10px; font-size: 14px; }
+.frame > .cap b { margin-right: 8px; }
+.frame > .cap span { color: var(--text-2); }
+
+.stage {
+  position: relative;
+  border-radius: 14px;
+  overflow: hidden;
+  color: var(--text-1);
+}
+.light { color-scheme: only light; }
+.dark { color-scheme: only dark; }
+.stage.light { background: linear-gradient(140deg, #b9cdf6 0%, #dfe3ea 45%, #f1d2c4 100%); }
+.stage.dark { background: linear-gradient(140deg, #1b2440 0%, #0f1422 50%, #33283f 100%); }
+
+/* ?frame=xxx：只渲染一个样张，供截图 */
+body.solo { background: transparent; }
+body.solo .doc-head, body.solo .frame > .cap { display: none; }
+body.solo .frame { margin: 0; padding: 0; max-width: none; }
+body.solo .frame:not(.on) { display: none; }
+body.solo .stage { border-radius: 0; }
+
+/* ---------- 菜单栏 ---------- */
+.menubar {
+  height: 28px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 10px 0 14px;
+  font-size: 13px;
+  color: var(--text-1);
+  background: light-dark(rgba(255, 255, 255, .42), rgba(0, 0, 0, .28));
+  backdrop-filter: blur(20px);
+}
+.mb-left, .mb-right { display: flex; align-items: center; gap: 18px; }
+.mb-left b { font-weight: 600; }
+.mb-right { gap: 14px; }
+.mb-item { display: flex; align-items: center; height: 22px; padding: 0 6px; border-radius: 6px; }
+.mb-item.on { background: light-dark(rgba(0, 0, 0, .12), rgba(255, 255, 255, .2)); }
+.mb-item svg { display: block; }
+/* 三列：箭头靠左、数字靠右、单位靠左 —— 两行的箭头、数字末位、单位各自对齐 */
+.rates {
+  display: grid; grid-template-columns: auto 1fr auto; column-gap: 3px;
+  font-size: 9.5px; line-height: 10.5px; font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  width: 64px;
+  letter-spacing: -.1px;
+}
+.rates .n { text-align: right; }
+.zoom { transform: scale(2); transform-origin: right top; }
+
+/* ---------- 弹出面板 ---------- */
+.popover {
+  position: absolute; width: 340px;
+  border-radius: 14px;
+  background: var(--panel-bg);
+  backdrop-filter: blur(30px) saturate(1.6);
+  box-shadow: var(--shadow);
+  color: var(--text-1);
+}
+.popover::before { /* NSPopover 的小箭头 */
+  content: ""; position: absolute; top: -7px; left: calc(50% - 8px);
+  width: 16px; height: 16px; transform: rotate(45deg);
+  background: var(--panel-bg); border-radius: 3px 0 0 0;
+}
+.pop-sec { position: relative; padding: 12px 16px; }
+.pop-sec + .pop-sec { border-top: .5px solid var(--sep); }
+.pop-label { font-size: 11px; font-weight: 600; color: var(--text-2); margin-bottom: 6px; display: flex; justify-content: space-between; }
+.pop-label .num { font-weight: 500; }
+.now { display: flex; align-items: center; gap: 14px; }
+.now .big { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.now .big small { font-size: 12px; font-weight: 500; color: var(--text-2); }
+.key { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.key.dl { background: var(--dl); } .key.ul { background: var(--ul); } .key.px { background: var(--px); } .key.dr { background: var(--track); }
+.spark { margin-left: auto; }
+
+.app-row { display: flex; align-items: center; gap: 8px; height: 28px; }
+.app-row img { width: 20px; height: 20px; flex: none; }
+.app-row .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-row .val { font-variant-numeric: tabular-nums; color: var(--text-1); white-space: nowrap; }
+.app-row .val i { font-style: normal; color: var(--text-2); }
+.app-row .minibar { width: 64px; }
+
+.totals { display: flex; align-items: baseline; gap: 14px; margin: 2px 0 8px; }
+.totals .sum { font-size: 20px; font-weight: 600; }
+.totals span { display: flex; align-items: center; gap: 5px; color: var(--text-1); font-variant-numeric: tabular-nums; }
+
+.segbar { display: flex; gap: 2px; height: 8px; }
+.segbar > i { display: block; height: 100%; border-radius: 4px; min-width: 0; }
+.segbar.thin { height: 5px; }
+.segbar .dl { background: var(--dl); } .segbar .ul { background: var(--ul); }
+.segbar .px { background: var(--px); } .segbar .dr { background: var(--track); }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--text-1); margin-top: 6px; font-variant-numeric: tabular-nums; }
+.legend span { display: flex; align-items: center; gap: 5px; }
+.legend em { font-style: normal; color: var(--text-2); }
+
+.pop-foot { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-top: .5px solid var(--sep); }
+.btn {
+  font: inherit; font-size: 13px; color: var(--text-1);
+  background: var(--fill-strong); border: 0; border-radius: 7px;
+  padding: 4px 12px; height: 26px;
+}
+.btn.plain { background: transparent; color: var(--text-2); padding: 4px 8px; }
+.btn.small { font-size: 12px; height: 22px; padding: 2px 9px; }
+.spacer { flex: 1; }
+
+/* ---------- 主窗口 ---------- */
+.window {
+  position: absolute; display: flex;
+  width: 1160px; height: 700px;
+  border-radius: 16px; overflow: hidden;
+  background: var(--win-bg);
+  box-shadow: var(--shadow);
+  color: var(--text-1);
+}
+.sidebar {
+  width: 200px; flex: none; margin: 8px; margin-right: 0;
+  border-radius: 12px; padding: 14px 10px;
+  background: var(--sidebar-bg);
+  backdrop-filter: blur(30px);
+}
+.lights { display: flex; gap: 8px; padding: 0 6px 22px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+.lights i:nth-child(1) { background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.nav a {
+  display: flex; align-items: center; gap: 9px;
+  height: 32px; padding: 0 10px; border-radius: 8px;
+  color: var(--text-1); text-decoration: none;
+}
+.nav a svg { width: 16px; height: 16px; color: var(--accent); flex: none; }
+.nav a.on { background: var(--fill-strong); font-weight: 500; }
+.sidebar .side-foot { position: absolute; bottom: 22px; left: 26px; right: 26px; font-size: 11px; color: var(--text-3); }
+
+.content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.toolbar { height: 56px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 20px 0 22px; }
+.toolbar h1 { font-size: 15px; font-weight: 600; margin: 0; }
+.toolbar .sub { color: var(--text-2); }
+.page { flex: 1; min-height: 0; overflow: hidden; padding: 4px 22px 20px; display: flex; flex-direction: column; gap: 14px; }
+
+.seg { display: inline-flex; background: var(--fill); border-radius: 8px; padding: 2px; gap: 2px; }
+.seg button {
+  font: inherit; font-size: 12.5px; color: var(--text-1);
+  border: 0; background: transparent; border-radius: 6px; height: 24px; padding: 0 11px;
+}
+.seg button.on { background: var(--seg-on); box-shadow: 0 1px 2px rgba(0, 0, 0, .14), 0 0 0 .5px rgba(0, 0, 0, .06); font-weight: 500; }
+.datebtn { display: inline-flex; align-items: center; gap: 6px; }
+
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.tile { background: var(--page-bg); border-radius: 10px; padding: 10px 14px; }
+.tile .lab { font-size: 12px; color: var(--text-2); display: flex; align-items: center; gap: 6px; }
+.tile .v { font-size: 20px; font-weight: 600; margin-top: 2px; }
+.tile .d { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.tile.hero .v { font-size: 30px; }
+
+/* 排行表 */
+.split { flex: 1; min-height: 0; display: flex; gap: 16px; }
+.table { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.thead, .trow { display: grid; grid-template-columns: minmax(0, 1fr) 76px 76px 150px 84px; align-items: center; column-gap: 10px; padding: 0 10px; }
+.thead { height: 28px; font-size: 11.5px; color: var(--text-2); border-bottom: .5px solid var(--sep); }
+.thead .r, .trow .r { text-align: right; }
+.thead .sort::after { content: " ↓"; }
+.trow { height: 42px; border-radius: 8px; }
+.trow + .trow { box-shadow: 0 -.5px 0 var(--sep); }
+.trow.sel { background: var(--select); box-shadow: none; }
+.trow.sel + .trow { box-shadow: none; }
+.trow .app { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.trow .app img { width: 22px; height: 22px; }
+.trow .app .t { min-width: 0; }
+.trow .app .t div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trow .app .t small { display: block; font-size: 11px; color: var(--text-2); line-height: 1.2; }
+.trow .num { font-variant-numeric: tabular-nums; }
+.tot { display: flex; align-items: center; gap: 8px; }
+.tot .segbar { flex: 1; }
+.tot .num { width: 60px; text-align: right; }
+.pxcell { display: flex; align-items: center; gap: 7px; justify-content: flex-end; }
+.pxcell .segbar { width: 34px; }
+.pxcell .num { width: 34px; text-align: right; }
+.chev { color: var(--text-3); font-size: 10px; margin-left: 2px; }
+
+.detail { width: 262px; flex: none; background: var(--page-bg); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.detail .hd { display: flex; align-items: center; gap: 10px; }
+.detail .hd img { width: 34px; height: 34px; }
+.detail .hd b { font-size: 15px; display: block; }
+.detail .hd small { color: var(--text-2); }
+.detail h3 { font-size: 11px; font-weight: 600; color: var(--text-2); margin: 0 0 6px; }
+.proc { display: flex; justify-content: space-between; gap: 10px; height: 22px; align-items: center; font-size: 12px; }
+.proc span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.proc .num { color: var(--text-2); white-space: nowrap; flex: none; }
+
+/* 图表 */
+.chart-card { background: var(--chart-surface); border: .5px solid var(--sep); border-radius: 12px; padding: 12px 14px 8px; position: relative; }
+.chart-head { display: flex; align-items: center; gap: 14px; margin-bottom: 4px; }
+.chart-head .legend { margin: 0; }
+.chart-head .hint { margin-left: auto; font-size: 12px; color: var(--text-2); }
+svg text { font-family: var(--font); }
+.tip {
+  position: absolute; pointer-events: none;
+  background: var(--panel-bg); backdrop-filter: blur(20px);
+  border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, .18), 0 0 0 .5px var(--sep);
+  padding: 7px 10px; font-size: 12px; white-space: nowrap;
+}
+.tip b { display: block; font-weight: 600; margin-bottom: 2px; }
+.tip div { display: flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.drill { background: var(--page-bg); border-radius: 12px; padding: 12px 16px; }
+.drill h3 { font-size: 12px; margin: 0 0 4px; display: flex; gap: 10px; align-items: baseline; }
+.drill h3 small { font-weight: 400; color: var(--text-2); }
+.drill .rows { display: grid; grid-template-columns: 1fr 1fr; column-gap: 28px; }
+.drill .app-row .val { width: 96px; text-align: right; }
+
+/* 设置 */
+.form { max-width: 640px; display: flex; flex-direction: column; gap: 18px; overflow: hidden; }
+.group h2 { font-size: 13px; font-weight: 600; margin: 0 0 6px 4px; }
+.group .box { background: var(--page-bg); border-radius: 10px; padding: 0 14px; }
+.frow { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 8px 0; }
+.frow + .frow { border-top: .5px solid var(--sep); }
+.frow .t { flex: 1; min-width: 0; }
+.frow .t small { display: block; color: var(--text-2); font-size: 12px; margin-top: 1px; }
+.frow img { width: 26px; height: 26px; }
+.switch { width: 38px; height: 22px; border-radius: 11px; background: var(--fill-strong); position: relative; flex: none; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .25); }
+.switch.on { background: var(--switch-on); }
+.switch.on::after { left: 18px; }
+.badge { font-size: 11px; color: var(--text-2); background: var(--fill); border-radius: 5px; padding: 1px 6px; }
+.node { display: grid; grid-template-columns: 1fr 90px 84px; align-items: center; gap: 10px; height: 34px; font-size: 12.5px; }
+.node + .node { border-top: .5px solid var(--sep); }
+.node .num { text-align: right; color: var(--text-2); }
+.node code { font: 12px/1 ui-monospace, "SF Mono", monospace; }
+
+/* 月报 */
+.toplist { display: grid; grid-template-columns: 1fr 1fr; column-gap: 28px; }
+.toplist .app-row { height: 30px; }
+.toplist .tl-head { height: 20px; font-size: 11px; color: var(--text-2); }
+.toplist .tl-head .val { color: var(--text-2); }
+.toplist .app-row .minibar { width: 110px; }
+.toplist .app-row .val { width: 64px; text-align: right; }
+.toplist .app-row .pct { width: 56px; text-align: right; color: var(--text-2); font-variant-numeric: tabular-nums; font-size: 12px; }
+
+/* 通知 */
+.notice {
+  position: absolute; width: 360px; border-radius: 20px; padding: 12px 14px;
+  display: flex; gap: 11px; align-items: flex-start;
+  background: light-dark(rgba(246, 246, 248, .86), rgba(44, 44, 46, .86));
+  backdrop-filter: blur(30px) saturate(1.6);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .2), 0 0 0 .5px rgba(0, 0, 0, .15);
+  color: var(--text-1);
+}
+.notice .ic { width: 38px; height: 38px; flex: none; }
+.notice .body { flex: 1; min-width: 0; }
+.notice .row1 { display: flex; justify-content: space-between; font-size: 13px; }
+.notice .row1 span { color: var(--text-2); font-size: 12px; }
+.notice b { font-weight: 600; }
+.notice p { margin: 1px 0 0; color: var(--text-1); font-size: 13px; }
+.notice code { font: 12px/1.3 ui-monospace, "SF Mono", monospace; color: var(--text-2); }
+</style>
+</head>
+<body>
+
+<header class="doc-head">
+  <h1>NetTick 设计稿</h1>
+  <p>2026-11-24 · 第一版。数字是按本机今天的真实量级编的样例。</p>
+</header>
+
+<section class="frame" id="menubar">
+  <p class="cap"><b>菜单栏</b><span>上下两行：上传、下载。宽度固定，数字跳动时不挤动旁边的图标。</span></p>
+  <div class="stage light" style="height:150px">
+    <div data-menubar="light"></div>
+    <div class="zoom" style="position:absolute; right:250px; top:46px" data-menubar-zoom></div>
+  </div>
+  <div class="stage dark" style="height:150px; margin-top:10px">
+    <div data-menubar="dark"></div>
+    <div class="zoom" style="position:absolute; right:250px; top:46px" data-menubar-zoom></div>
+  </div>
+</section>
+
+<section class="frame" id="popover-light">
+  <p class="cap"><b>点菜单栏弹出的面板</b><span>现在的速率、正在用网的 App、今天的总量和排行。</span></p>
+  <div class="stage light" style="height:600px; width:560px">
+    <div data-menubar="light" data-open></div>
+    <div class="popover" style="top:38px; right:107px" data-popover></div>
+  </div>
+</section>
+
+<section class="frame" id="popover-dark">
+  <p class="cap"><b>面板 · 深色</b></p>
+  <div class="stage dark" style="height:600px; width:560px">
+    <div data-menubar="dark" data-open></div>
+    <div class="popover" style="top:38px; right:107px" data-popover></div>
+  </div>
+</section>
+
+<section class="frame" id="rank">
+  <p class="cap"><b>主窗口 · 流量排行</b><span>按时间段看每个 App 用了多少；选中一行，右边是它的明细。</span></p>
+  <div class="stage light" style="height:760px">
+    <div class="window" style="left:40px; top:30px" data-window="rank"></div>
+  </div>
+</section>
+
+<section class="frame" id="rank-dark">
+  <p class="cap"><b>主窗口 · 流量排行 · 深色</b></p>
+  <div class="stage dark" style="height:760px">
+    <div class="window" style="left:40px; top:30px" data-window="rank"></div>
+  </div>
+</section>
+
+<section class="frame" id="curve">
+  <p class="cap"><b>主窗口 · 速率曲线</b><span>最近 1 小时 / 24 小时；点曲线上任意一处，下面列出那一刻在用网的 App。</span></p>
+  <div class="stage light" style="height:760px">
+    <div class="window" style="left:40px; top:30px" data-window="curve"></div>
+  </div>
+</section>
+
+<section class="frame" id="month">
+  <p class="cap"><b>主窗口 · 月报</b><span>每月总量、每天的量、用得最多的 App。</span></p>
+  <div class="stage light" style="height:760px">
+    <div class="window" style="left:40px; top:30px" data-window="month"></div>
+  </div>
+</section>
+
+<section class="frame" id="settings">
+  <p class="cap"><b>主窗口 · 设置</b></p>
+  <div class="stage light" style="height:760px">
+    <div class="window" style="left:40px; top:30px" data-window="settings"></div>
+  </div>
+</section>
+
+<section class="frame" id="notify">
+  <p class="cap"><b>新程序第一次联网时的通知</b><span>只通知，不拦截。</span></p>
+  <div class="stage light" style="height:170px; width:560px">
+    <div data-menubar="light"></div>
+    <div class="notice" style="top:42px; right:14px" data-notice></div>
+  </div>
+</section>
+
+<script>
+/* ---------- 工具 ---------- */
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+function fmt(b, rate = false) {
+  const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0;
+  while (b >= 999.5 && i < u.length - 1) { b /= 1000; i++; }
+  let s = i === 0 ? String(Math.round(b)) : b >= 99.95 ? b.toFixed(0) : b >= 9.995 ? b.toFixed(1) : b.toFixed(2);
+  if (s.includes('.')) s = s.replace(/0+$/, '').replace(/\.$/, '');
+  return `${s} ${u[i]}${rate ? '/s' : ''}`;
+}
+const pct = x => `${Math.round(x * 100)}%`;
+const icon = n => `<img src="icons/${n}.png" alt="">`;
+function segbar(parts, cls = '') {
+  const total = parts.reduce((a, p) => a + p.v, 0) || 1;
+  return `<div class="segbar ${cls}">${parts.filter(p => p.v > 0).map(p =>
+    `<i class="${p.c}" style="flex:${p.v / total} 1 0"></i>`).join('')}</div>`;
+}
+/* 绝对长度的条：已用部分 + 留白（排行里比的是和第一名的差距） */
+function lenbar(parts, max, cls = '') {
+  const used = parts.reduce((a, p) => a + p.v, 0);
+  return `<div class="segbar ${cls}">${parts.filter(p => p.v > 0).map(p =>
+    `<i class="${p.c}" style="flex:${p.v / max} 1 0"></i>`).join('')}<i style="flex:${Math.max(0, 1 - used / max)} 1 0; background:transparent"></i></div>`;
+}
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+/* ---------- 样例数据（今天） ---------- */
+const APPS = [
+  { id: 'claude', name: 'claude', sub: '命令行程序', icon: 'exec', down: 142e6, up: 2.55e9, px: 1 },
+  { id: 'chrome', name: 'Google Chrome', sub: '5 个进程', icon: 'chrome', down: 1.86e9, up: 126e6, px: .38 },
+  { id: 'system', name: '系统服务', sub: '9 个进程', icon: 'system', down: 1.21e9, up: 362e6, px: .04, group: true },
+  { id: 'uu', name: 'UU远程', icon: 'uu', down: 98.6e6, up: 591e6, px: 0 },
+  { id: 'wechat', name: '微信', icon: 'wechat', down: 168e6, up: 14e6, px: 0 },
+  { id: 'viscosity', name: 'Viscosity', icon: 'viscosity', down: 139e6, up: 73e6, px: 0 },
+  { id: 'wps', name: 'WPS Office', icon: 'wps', down: 41e6, up: 6.2e6, px: 0 },
+  { id: '1password', name: '1Password', icon: '1password', down: 3.2e6, up: 1.1e6, px: 1 },
+  { id: 'tabflick', name: 'TabFlick', icon: 'tabflick', down: 2.1e6, up: .4e6, px: .6 },
+];
+APPS.forEach(a => { a.total = a.down + a.up; a.pxBytes = a.total * a.px; });
+APPS.sort((a, b) => b.total - a.total);
+const T = APPS.reduce((t, a) => ({ down: t.down + a.down, up: t.up + a.up, px: t.px + a.pxBytes }), { down: 0, up: 0, px: 0 });
+T.total = T.down + T.up; T.dr = T.total - T.px;
+const byId = Object.fromEntries(APPS.map(a => [a.id, a]));
+const NOW = { down: 936e3, up: 1.98e6 };
+const ACTIVE = [
+  { a: 'claude', up: 1.9e6, down: 12e3 },
+  { a: 'chrome', down: 820e3, up: 34e3 },
+  { a: 'wechat', down: 96e3, up: 8e3 },
+];
+
+/* ---------- 菜单栏 ---------- */
+const svgWifi = `<svg width="17" height="13" viewBox="0 0 17 13" fill="currentColor"><path d="M8.5 2.2c2.5 0 4.8 1 6.5 2.6l1.2-1.3C14.2 1.6 11.5.4 8.5.4S2.8 1.6.8 3.5L2 4.8c1.7-1.6 4-2.6 6.5-2.6Zm0 3.4c1.6 0 3.1.6 4.2 1.7l1.2-1.3a7.8 7.8 0 0 0-10.8 0l1.2 1.3c1.1-1.1 2.6-1.7 4.2-1.7Zm0 3.4c.7 0 1.4.3 1.9.8L8.5 12 6.6 9.8c.5-.5 1.2-.8 1.9-.8Z"/></svg>`;
+const svgBatt = `<svg width="26" height="12" viewBox="0 0 26 12"><rect x=".5" y=".5" width="22" height="11" rx="3" fill="none" stroke="currentColor" opacity=".45"/><rect x="2" y="2" width="16" height="8" rx="1.6" fill="currentColor"/><path d="M24 4v4c.8-.3 1.3-1 1.3-2s-.5-1.7-1.3-2Z" fill="currentColor" opacity=".45"/></svg>`;
+function ratesItem(on) {
+  const cells = (arrow, v) => { const [n, u] = fmt(v, true).split(' '); return `<span>${arrow}</span><span class="n">${n}</span><span>${u}</span>`; };
+  return `<span class="mb-item ${on ? 'on' : ''}"><span class="rates">${cells('↑', NOW.up)}${cells('↓', NOW.down)}</span></span>`;
+}
+$$('[data-menubar]').forEach(el => {
+  el.outerHTML = `<div class="menubar"><div class="mb-left"><b>访达</b><span>文件</span><span>编辑</span><span>显示</span></div>
+    <div class="mb-right">${ratesItem(el.hasAttribute('data-open'))}<span class="mb-item">${svgWifi}</span><span class="mb-item">${svgBatt}</span><span>11月24日 周二 14:50</span></div></div>`;
+});
+$$('[data-menubar-zoom]').forEach(el => { el.innerHTML = `<div style="display:flex;align-items:center;gap:14px">${ratesItem(false)}<span class="mb-item">${svgWifi}</span></div>`; });
+
+/* ---------- 迷你曲线（面板，60 秒） ---------- */
+function sparkline(w, h) {
+  const r = rng(7), n = 60, dl = [], ul = [];
+  for (let i = 0; i < n; i++) {
+    dl.push(380e3 + r() * 500e3 + (i > 40 ? 300e3 : 0));
+    ul.push(i % 17 < 6 ? 1.2e6 + r() * 900e3 : 60e3 + r() * 120e3);
+  }
+  dl[n - 1] = NOW.down; ul[n - 1] = NOW.up;
+  const max = Math.max(...dl, ...ul) * 1.1;
+  const pts = s => s.map((v, i) => `${(i / (n - 1) * w).toFixed(1)},${(h - v / max * h).toFixed(1)}`).join(' ');
+  const area = s => `M0,${h} L${pts(s).split(' ').join(' L')} L${w},${h} Z`;
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-label="最近 60 秒的上传、下载速率">
+    <path d="${area(dl)}" fill="var(--dl)" opacity=".12"/><path d="${area(ul)}" fill="var(--ul)" opacity=".12"/>
+    <polyline points="${pts(dl)}" fill="none" stroke="var(--dl)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+    <polyline points="${pts(ul)}" fill="none" stroke="var(--ul)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+
+/* ---------- 面板 ---------- */
+function popoverHTML() {
+  const topMax = APPS[0].total;
+  return `
+  <div class="pop-sec">
+    <div class="pop-label"><span>现在</span><span class="num">最近 60 秒</span></div>
+    <div class="now">
+      <div><div class="big"><span class="key ul"></span>↑ ${fmt(NOW.up, true)}</div>
+           <div class="big"><span class="key dl"></span>↓ ${fmt(NOW.down, true)}</div></div>
+      ${sparkline(120, 46)}
+    </div>
+  </div>
+  <div class="pop-sec">
+    <div class="pop-label"><span>正在用网</span></div>
+    ${ACTIVE.map(x => { const a = byId[x.a]; const main = x.up > x.down ? `↑ ${fmt(x.up, true)}` : `↓ ${fmt(x.down, true)}`;
+      const other = x.up > x.down ? `↓ ${fmt(x.down, true)}` : `↑ ${fmt(x.up, true)}`;
+      return `<div class="app-row">${icon(a.icon)}<span class="name">${a.name}</span><span class="val">${main} <i>${other}</i></span></div>`; }).join('')}
+  </div>
+  <div class="pop-sec">
+    <div class="pop-label"><span>今天</span></div>
+    <div class="totals"><span class="sum">${fmt(T.total)}</span><span><span class="key ul"></span>↑ ${fmt(T.up)}</span><span><span class="key dl"></span>↓ ${fmt(T.down)}</span></div>
+    ${segbar([{ v: T.px, c: 'px' }, { v: T.dr, c: 'dr' }])}
+    <div class="legend"><span><span class="key px"></span>走代理 ${fmt(T.px)}</span><span><span class="key dr"></span>直连 ${fmt(T.dr)}</span></div>
+    <div style="height:10px"></div>
+    ${APPS.slice(0, 5).map(a => `<div class="app-row">${icon(a.icon)}<span class="name">${a.name}</span>
+      <span class="minibar">${lenbar([{ v: a.up, c: 'ul' }, { v: a.down, c: 'dl' }], topMax, 'thin')}</span>
+      <span class="val" style="width:58px;text-align:right">${fmt(a.total)}</span></div>`).join('')}
+  </div>
+  <div class="pop-foot"><button class="btn">打开主窗口</button><span class="spacer"></span><button class="btn plain">设置</button><button class="btn plain">退出</button></div>`;
+}
+$$('[data-popover]').forEach(el => el.innerHTML = popoverHTML());
+
+/* ---------- 主窗口骨架 ---------- */
+const NAV = [
+  ['rank', '流量排行', '<path d="M3 4h10M3 8h7M3 12h4"/>'],
+  ['curve', '速率曲线', '<path d="M2 12.5 5 7l3 2.5L11 3l3 4.5"/>'],
+  ['month', '月报', '<rect x="2.5" y="3.5" width="11" height="10" rx="2"/><path d="M2.5 7h11M5.5 2v3M10.5 2v3"/>'],
+  ['settings', '设置', '<circle cx="8" cy="8" r="2.3"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M3.6 12.4 5 11M11 5l1.4-1.4"/>'],
+];
+function shell(active, toolbar, body) {
+  return `<aside class="sidebar" style="position:relative"><div class="lights"><i></i><i></i><i></i></div>
+    <nav class="nav">${NAV.map(([id, t, p]) => `<a class="${id === active ? 'on' : ''}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${p}</svg>${t}</a>`).join('')}</nav>
+    <div class="side-foot">2026-11-24 开始统计</div></aside>
+    <section class="content"><div class="toolbar">${toolbar}</div><div class="page">${body}</div></section>`;
+}
+const seg = (items, on) => `<div class="seg">${items.map(t => `<button class="${t === on ? 'on' : ''}">${t}</button>`).join('')}</div>`;
+
+/* ---------- 流量排行 ---------- */
+function rankPage() {
+  const max = APPS[0].total;
+  const rows = APPS.map(a => `<div class="trow ${a.id === 'chrome' ? 'sel' : ''}">
+    <div class="app">${icon(a.icon)}<div class="t"><div>${a.name}${a.group ? '<span class="chev"> ▸</span>' : ''}</div>${a.sub ? `<small>${a.sub}</small>` : ''}</div></div>
+    <div class="r num">${fmt(a.down)}</div><div class="r num">${fmt(a.up)}</div>
+    <div class="tot">${lenbar([{ v: a.down, c: 'dl' }, { v: a.up, c: 'ul' }], max, 'thin')}<span class="num">${fmt(a.total)}</span></div>
+    <div class="pxcell">${segbar([{ v: a.px, c: 'px' }, { v: 1 - a.px, c: 'dr' }], 'thin')}<span class="num">${pct(a.px)}</span></div></div>`).join('');
+  const c = byId.chrome;
+  const r = rng(3), hours = [];
+  for (let h = 0; h < 24; h++) {
+    const on = h <= 14 && h >= 8 ? 1 : h <= 14 ? .1 : 0;
+    hours.push({ d: on * (40e6 + r() * 220e6), u: on * (3e6 + r() * 14e6) });
+  }
+  hours[14].d = 610e6; hours[14].u = 18e6;
+  const procs = [['Google Chrome Helper', 1.41e9], ['Google Chrome Helper (Renderer)', 402e6], ['Google Chrome', 98e6], ['Google Chrome Helper (Aperitif)', 61e6], ['Google Chrome Helper (GPU)', 2.1e6]];
+  const body = `
+  <div class="tiles">
+    <div class="tile"><div class="lab"><span class="key dl"></span>下载</div><div class="v num">${fmt(T.down)}</div></div>
+    <div class="tile"><div class="lab"><span class="key ul"></span>上传</div><div class="v num">${fmt(T.up)}</div></div>
+    <div class="tile"><div class="lab"><span class="key px"></span>走代理</div><div class="v num">${fmt(T.px)}</div><div class="d">占 ${pct(T.px / T.total)}</div></div>
+    <div class="tile"><div class="lab"><span class="key dr"></span>直连</div><div class="v num">${fmt(T.dr)}</div><div class="d">占 ${pct(T.dr / T.total)}</div></div>
+  </div>
+  <div class="split">
+    <div class="table">
+      <div class="thead"><div>App</div><div class="r">下载</div><div class="r">上传</div><div class="r sort">合计</div><div class="r">走代理</div></div>
+      ${rows}
+    </div>
+    <aside class="detail">
+      <div class="hd">${icon(c.icon)}<div><b>Google Chrome</b><small>今天 · ${fmt(c.total)}</small></div></div>
+      <div>${segbar([{ v: c.pxBytes, c: 'px' }, { v: c.total - c.pxBytes, c: 'dr' }])}
+        <div class="legend"><span><span class="key px"></span>走代理 ${fmt(c.pxBytes)}</span><span><span class="key dr"></span>直连 ${fmt(c.total - c.pxBytes)}</span></div></div>
+      <div><h3>每小时</h3>${hourBars(hours, 230, 92)}</div>
+      <div><h3>进程</h3>${procs.map(([n, v]) => `<div class="proc"><span>${n}</span><span class="num">${fmt(v)}</span></div>`).join('')}</div>
+    </aside>
+  </div>`;
+  const tb = `<h1>流量排行</h1><span class="spacer"></span>${seg(['今天', '昨天', '近 7 天', '近 30 天', '全部'], '今天')}
+    <button class="btn small datebtn"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="3.5" width="11" height="10" rx="2"/><path d="M2.5 7h11"/></svg>选日期</button>`;
+  return shell('rank', tb, body);
+}
+function hourBars(hours, w, h) {
+  const max = Math.max(...hours.map(x => x.d + x.u)) * 1.05, bw = 7, step = w / 24, base = h - 14;
+  let s = '';
+  hours.forEach((x, i) => {
+    const cx = i * step + step / 2, hd = x.d / max * base, hu = x.u / max * base;
+    if (hd > 0) s += `<path d="${colPath(cx - bw / 2, base, bw, hd, hu < 1)}" fill="var(--dl)"><title>${i}:00 下载 ${fmt(x.d)}，上传 ${fmt(x.u)}</title></path>`;
+    if (hu >= 1) s += `<path d="${colPath(cx - bw / 2, base - hd - 2, bw, hu, true)}" fill="var(--ul)"/>`;
+  });
+  [0, 6, 12, 18].forEach(t => s += `<text x="${t ? t * step + step / 2 : 0}" y="${h - 1}" font-size="10" fill="var(--text-2)" text-anchor="${t ? 'middle' : 'start'}">${t}时</text>`);
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><line x1="0" x2="${w}" y1="${base + .5}" y2="${base + .5}" stroke="var(--axis)"/>${s}</svg>`;
+}
+/* 柱：底部方角、顶部 radius 圆角（只有最上面一段圆角） */
+function colPath(x, yBase, w, hgt, roundTop, r = 3) {
+  if (hgt <= 0) return '';
+  const y = yBase - hgt;
+  r = roundTop ? Math.min(r, hgt, w / 2) : 0;
+  return `M${x},${yBase} V${y + r} Q${x},${y} ${x + r},${y} H${x + w - r} Q${x + w},${y} ${x + w},${y + r} V${yBase} Z`;
+}
+
+/* ---------- 速率曲线 ---------- */
+function rateSeries(range) {
+  const r = rng(range === '1h' ? 11 : 23), out = [];
+  if (range === '1h') {
+    let burstD = 0, burstU = 0, ampD = 0, ampU = 0;
+    for (let i = 0; i < 360; i++) {
+      const sec = 13 * 3600 + 50 * 60 + i * 10;
+      if (burstD <= 0 && r() < .02) { burstD = 3 + Math.floor(r() * 6); ampD = 250e3 + r() * 900e3; }
+      if (burstU <= 0 && r() < .028) { burstU = 2 + Math.floor(r() * 5); ampU = .6e6 + r() * 1.3e6; }
+      let d = 60e3 + r() * 70e3 + (burstD-- > 0 ? ampD * (.75 + r() * .25) : 0);
+      let u = 15e3 + r() * 20e3 + (burstU-- > 0 ? ampU * (.75 + r() * .25) : 0);
+      if (i >= 249 && i <= 262) d = 4.3e6 + r() * .55e6;
+      out.push({ t: sec, d, u });
+    }
+    out[253] = { t: out[253].t, d: 4.81e6, u: 1.24e6 };
+    out[359] = { t: out[359].t, d: NOW.down, u: NOW.up };
+  } else {
+    for (let i = 0; i < 288; i++) {
+      const sec = 14 * 3600 + 55 * 60 - (287 - i) * 300 + 86400;
+      const hour = Math.floor((sec % 86400) / 3600);
+      const awake = hour >= 9 || hour < 1 ? 1 : .08;
+      out.push({ t: sec, d: awake * (80e3 + r() * 420e3) + (r() < .04 ? 1.5e6 + r() * 2.5e6 : 0), u: awake * (30e3 + r() * 160e3) + (r() < .05 ? .6e6 + r() * 1.2e6 : 0) });
+    }
+  }
+  return out;
+}
+const hhmm = (s, sec) => { s = ((s % 86400) + 86400) % 86400; const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}${sec ? ':' + String(x).padStart(2, '0') : ''}`; };
+function niceStep(v, n) { const raw = v / n, p = 10 ** Math.floor(Math.log10(raw)); for (const k of [1, 2, 2.5, 5, 10]) if (raw <= k * p) return k * p; }
+function rateChart(data, range, w, h, sel) {
+  const m = { l: 64, r: 12, t: 10, b: 26 }, iw = w - m.l - m.r, ih = h - m.t - m.b;
+  const top = Math.max(...data.map(p => Math.max(p.d, p.u))) * 1.05, stepV = niceStep(top, 3), tickN = Math.ceil(top / stepV), max = stepV * tickN;
+  const x = i => m.l + i / (data.length - 1) * iw, y = v => m.t + ih - v / max * ih;
+  let g = '';
+  for (let k = 0; k <= tickN; k++) {
+    const v = max / tickN * k, yy = Math.round(y(v)) + .5;
+    g += `<line x1="${m.l}" x2="${w - m.r}" y1="${yy}" y2="${yy}" stroke="${k ? 'var(--grid)' : 'var(--axis)'}"/>`;
+    g += `<text x="${m.l - 8}" y="${yy + 4}" font-size="11" fill="var(--text-2)" text-anchor="end">${k ? fmt(v, true) : '0'}</text>`;
+  }
+  const stepT = range === '1h' ? 600 : 3 * 3600;
+  data.forEach((p, i) => { if (p.t % stepT === 0) g += `<text x="${x(i)}" y="${h - 6}" font-size="11" fill="var(--text-2)" text-anchor="middle">${hhmm(p.t)}</text>`; });
+  const line = k => data.map((p, i) => `${x(i).toFixed(1)},${y(p[k]).toFixed(1)}`).join(' ');
+  const area = k => `M${m.l},${y(0)} L${line(k).split(' ').join(' L')} L${x(data.length - 1)},${y(0)} Z`;
+  let s = `<path d="${area('d')}" fill="var(--dl)" opacity=".1"/><path d="${area('u')}" fill="var(--ul)" opacity=".1"/>
+    <polyline points="${line('d')}" fill="none" stroke="var(--dl)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    <polyline points="${line('u')}" fill="none" stroke="var(--ul)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  if (sel != null) {
+    const p = data[sel], xx = x(sel);
+    s += `<line x1="${xx}" x2="${xx}" y1="${m.t}" y2="${m.t + ih}" stroke="var(--text-2)" stroke-width="1"/>
+      <circle cx="${xx}" cy="${y(p.d)}" r="4.5" fill="var(--dl)" stroke="var(--chart-surface)" stroke-width="2"/>
+      <circle cx="${xx}" cy="${y(p.u)}" r="4.5" fill="var(--ul)" stroke="var(--chart-surface)" stroke-width="2"/>`;
+  }
+  return { svg: `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="上传、下载速率曲线">${g}${s}<line class="hover-x" y1="${m.t}" y2="${m.t + ih}" stroke="var(--text-3)" stroke-dasharray="0" visibility="hidden"/><rect class="hit" x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="transparent"/></svg>`, x, y, m, iw };
+}
+/* 选中那一刻的 App 构成：样例里按比例拆 */
+function breakdown(p, big) {
+  const dShare = big ? { chrome: .955, system: .03, wechat: .01, '1password': .005 } : { chrome: .58, wechat: .16, system: .16, claude: .06, '1password': .04 };
+  const uShare = p.u > 5e5 ? { claude: .9, chrome: .05, uu: .05 } : { chrome: .4, claude: .3, wechat: .2, uu: .1 };
+  const ids = new Set([...Object.keys(dShare), ...Object.keys(uShare)]);
+  return [...ids].map(id => ({ a: byId[id], d: p.d * (dShare[id] || 0), u: p.u * (uShare[id] || 0) }))
+    .filter(x => x.d + x.u > 1e3).sort((a, b) => (b.d + b.u) - (a.d + a.u)).slice(0, 6);
+}
+function drillHTML(data, i, range) {
+  const p = data[i], span = range === '1h' ? 10 : 300, big = p.d > 3e6;
+  const list = breakdown(p, big);
+  return `<h3>${hhmm(p.t, range === '1h')} – ${hhmm(p.t + span, range === '1h')}<small>↓ ${fmt(p.d, true)}　↑ ${fmt(p.u, true)}</small></h3>
+    <div class="rows">${list.map(x => `<div class="app-row">${icon(x.a.icon)}<span class="name">${x.a.name}</span><span class="val">${x.d > 500 ? '↓ ' + fmt(x.d, true) : '—'}</span><span class="val">${x.u > 500 ? '↑ ' + fmt(x.u, true) : '—'}</span></div>`).join('')}</div>`;
+}
+function curvePage() {
+  const tb = `<h1>速率曲线</h1><span class="spacer"></span>${seg(['1 小时', '24 小时'], '1 小时')}`;
+  const body = `<div class="chart-card" data-rate>
+      <div class="chart-head"><div class="legend"><span><span class="key dl"></span>下载</span><span><span class="key ul"></span>上传</span></div><span class="hint">点曲线看那一刻是谁在用网</span></div>
+      <div class="plot"></div></div>
+    <div class="drill" data-drill></div>`;
+  return shell('curve', tb, body);
+}
+function mountRate(win) {
+  const card = win.querySelector('[data-rate]');
+  if (!card) return;
+  const plot = card.querySelector('.plot'), drill = win.querySelector('[data-drill]');
+  let range = '1h', data = rateSeries(range), sel = 253;
+  const render = () => {
+    const c = rateChart(data, range, plot.clientWidth || 880, 390, sel);
+    plot.innerHTML = c.svg; drill.innerHTML = drillHTML(data, sel, range);
+    const svg = plot.querySelector('svg'), hx = svg.querySelector('.hover-x');
+    let tip = card.querySelector('.tip'); if (!tip) { tip = document.createElement('div'); tip.className = 'tip'; card.append(tip); }
+    const showTip = (i, fixed) => {
+      const p = data[i], xx = c.x(i);
+      tip.innerHTML = `<b>${hhmm(p.t, range === '1h')}</b><div><span class="key dl"></span>↓ ${fmt(p.d, true)}</div><div><span class="key ul"></span>↑ ${fmt(p.u, true)}</div>`;
+      tip.style.left = `${Math.min(xx + 24, card.clientWidth - 150)}px`; tip.style.top = `${Math.max(40, c.y(Math.max(p.d, p.u)) + 30)}px`;
+      tip.style.visibility = 'visible';
+      if (!fixed) { hx.setAttribute('x1', xx); hx.setAttribute('x2', xx); hx.setAttribute('visibility', 'visible'); }
+    };
+    const idx = e => { const b = svg.getBoundingClientRect(); return Math.max(0, Math.min(data.length - 1, Math.round((e.clientX - b.left - c.m.l) / c.iw * (data.length - 1)))); };
+    const hit = svg.querySelector('.hit');
+    hit.addEventListener('pointermove', e => showTip(idx(e)));
+    hit.addEventListener('pointerleave', () => { hx.setAttribute('visibility', 'hidden'); showTip(sel, true); });
+    hit.addEventListener('click', e => { sel = idx(e); render(); });
+    showTip(sel, true);
+  };
+  win.querySelectorAll('.toolbar .seg button').forEach(b => b.addEventListener('click', () => {
+    win.querySelectorAll('.toolbar .seg button').forEach(x => x.classList.toggle('on', x === b));
+    range = b.textContent.startsWith('1') ? '1h' : '24h'; data = rateSeries(range);
+    sel = data.reduce((bi, p, i) => (p.d > data[bi].d ? i : bi), 0); render();
+  }));
+  render();
+}
+
+/* ---------- 月报 ---------- */
+function monthData() {
+  const r = rng(5), days = [];
+  for (let d = 1; d <= 30; d++) {
+    if (d > 24) { days.push(null); continue; }
+    const wk = new Date(2026, 10, d).getDay(), off = wk === 0 || wk === 6 ? .45 : 1;
+    days.push({ d: off * (2.6e9 + r() * 5.2e9), u: off * (.9e9 + r() * 3e9) });
+  }
+  days[23] = { d: T.down, u: T.up };
+  return days;
+}
+function monthChart(days, w, h) {
+  const m = { l: 56, r: 10, t: 10, b: 24 }, iw = w - m.l - m.r, ih = h - m.t - m.b;
+  const max = 15e9, step = iw / 30, bw = Math.min(18, step - 6), y0 = m.t + ih;
+  let g = '';
+  [0, 5e9, 10e9, 15e9].forEach((v, k) => { const yy = Math.round(y0 - v / max * ih) + .5;
+    g += `<line x1="${m.l}" x2="${w - m.r}" y1="${yy}" y2="${yy}" stroke="${k ? 'var(--grid)' : 'var(--axis)'}"/><text x="${m.l - 8}" y="${yy + 4}" font-size="11" fill="var(--text-2)" text-anchor="end">${k ? fmt(v) : '0'}</text>`; });
+  days.forEach((x, i) => {
+    const cx = m.l + i * step + step / 2, lab = [1, 5, 10, 15, 20, 24, 30].includes(i + 1);
+    if (lab) g += `<text x="${cx}" y="${h - 6}" font-size="11" fill="var(--text-2)" text-anchor="middle">${i + 1 === 24 ? '今天' : i + 1 + '日'}</text>`;
+    if (!x) return;
+    const hd = x.d / max * ih, hu = x.u / max * ih;
+    g += `<g><title>11 月 ${i + 1} 日：下载 ${fmt(x.d)}，上传 ${fmt(x.u)}</title><path d="${colPath(cx - bw / 2, y0, bw, hd, false)}" fill="var(--dl)"/><path d="${colPath(cx - bw / 2, y0 - hd - 2, bw, hu, true, 4)}" fill="var(--ul)"/></g>`;
+  });
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="11 月每天的下载、上传量">${g}</svg>`;
+}
+function monthPage() {
+  const days = monthData().filter(Boolean);
+  const D = days.reduce((a, x) => a + x.d, 0), U = days.reduce((a, x) => a + x.u, 0), tot = D + U, pxShare = .43;
+  const top = [['claude', .30, 1], ['chrome', .27, .41], ['system', .14, .05], ['uu', .105, 0], ['wechat', .056, 0], ['viscosity', .035, 0], ['wps', .013, 0], ['1password', .002, 1]];
+  const tmax = top[0][1];
+  const tb = `<h1>月报</h1><span class="spacer"></span><button class="btn small">‹</button><b style="font-weight:600">2026 年 11 月</b><button class="btn small" disabled style="opacity:.4">›</button>`;
+  const body = `<div class="tiles">
+      <div class="tile hero"><div class="lab">本月合计</div><div class="v">${fmt(tot)}</div><div class="d">比 10 月同期多 12%</div></div>
+      <div class="tile"><div class="lab"><span class="key dl"></span>下载</div><div class="v num">${fmt(D)}</div></div>
+      <div class="tile"><div class="lab"><span class="key ul"></span>上传</div><div class="v num">${fmt(U)}</div></div>
+      <div class="tile"><div class="lab"><span class="key px"></span>走代理</div><div class="v num">${fmt(tot * pxShare)}</div><div class="d">占 ${pct(pxShare)}</div></div></div>
+    <div class="chart-card"><div class="chart-head"><b style="font-size:12px">每天</b><div class="legend"><span><span class="key dl"></span>下载</span><span><span class="key ul"></span>上传</span></div></div>${monthChart(monthData(), 880, 250)}</div>
+    <div class="drill"><h3>用得最多的 App</h3><div class="toplist"><div class="app-row tl-head"><span class="name"></span><span class="val">合计</span><span class="pct">走代理</span></div><div class="app-row tl-head"><span class="name"></span><span class="val">合计</span><span class="pct">走代理</span></div>${top.map(([id, s, px]) => { const a = byId[id];
+      return `<div class="app-row">${icon(a.icon)}<span class="name">${a.name}</span><span class="minibar">${lenbar([{ v: s * .62, c: 'dl' }, { v: s * .38, c: 'ul' }], tmax, 'thin')}</span><span class="val">${fmt(tot * s)}</span><span class="pct">${pct(px)}</span></div>`; }).join('')}</div></div>`;
+  return shell('month', tb, body);
+}
+
+/* ---------- 设置 ---------- */
+function settingsPage() {
+  const nodes = [['203.0.113.24:443', 2.61e9], ['198.51.100.7:8443', 838e6], ['203.0.113.80:20443', 71e6]];
+  const body = `<div class="form">
+    <div class="group"><h2>通用</h2><div class="box">
+      <div class="frow"><div class="t">开机时启动<small>不开的话，NetTick 没运行的时候统计不到。</small></div><span class="switch"></span></div>
+    </div></div>
+    <div class="group"><h2>提醒</h2><div class="box">
+      <div class="frow"><div class="t">新程序第一次联网时通知<small>只通知，不拦截。</small></div><span class="switch on"></span></div>
+    </div></div>
+    <div class="group"><h2>代理</h2><div class="box">
+      <div class="frow">${icon('surge')}<div class="t">Surge<small>虚拟网卡 utun8 · 系统代理 127.0.0.1:7890</small></div><span class="badge">自动识别</span></div>
+      <div class="frow" style="display:block">
+        <div class="t" style="margin-bottom:4px">代理节点<small>代理软件发往这些地址的流量算走代理，其余算直连。认错了的点「不是节点」。</small></div>
+        ${nodes.map(([n, v]) => `<div class="node"><code>${n}</code><span class="num">今天 ${fmt(v)}</span><button class="btn small">不是节点</button></div>`).join('')}
+      </div>
+    </div></div>
+    <div class="group"><h2>数据</h2><div class="box">
+      <div class="frow"><div class="t">从 2026 年 11 月 24 日开始统计<small>占用 1.4 MB</small></div><button class="btn small">在访达中显示</button></div>
+    </div></div>
+  </div>`;
+  return shell('settings', '<h1>设置</h1>', body);
+}
+
+/* ---------- 通知 ---------- */
+const appIcon = `<svg class="ic" viewBox="0 0 38 38"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a8ef0"/><stop offset="1" stop-color="#1557b8"/></linearGradient></defs><rect width="38" height="38" rx="9" fill="url(#g)"/><path d="M13 27V12m0 0-4.5 4.5M13 12l4.5 4.5M25 11v15m0 0-4.5-4.5M25 26l4.5-4.5" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+$$('[data-notice]').forEach(el => el.innerHTML = `${appIcon}<div class="body"><div class="row1"><b>ollama 第一次联网</b><span>现在</span></div><code>/opt/homebrew/bin/ollama</code></div>`);
+
+/* ---------- 挂载 ---------- */
+const PAGES = { rank: rankPage, curve: curvePage, month: monthPage, settings: settingsPage };
+$$('[data-window]').forEach(w => { w.innerHTML = PAGES[w.dataset.window](); mountRate(w); });
+
+const only = new URLSearchParams(location.search).get('frame');
+if (only) { document.body.classList.add('solo'); document.getElementById(only)?.classList.add('on'); }
+</script>
+</body>
+</html>

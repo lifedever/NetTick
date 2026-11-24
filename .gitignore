@@ -1,0 +1,19 @@
+# AI 助手相关文件
+CLAUDE.md
+AGENTS.md
+.claude/
+
+# Swift / SwiftPM
+.build/
+.swiftpm/
+*.xcodeproj
+*.xcworkspace
+.DS_Store
+
+# 运行时与打包产物
+*.log
+build/
+assets/NetTick.icns
+
+# 设计稿截图（index.html 可以重新生成）
+mockups/png/
