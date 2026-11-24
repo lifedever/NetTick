@@ -148,13 +148,11 @@ struct PopoverView: View {
         HStack(spacing: 8) {
             Button("打开主窗口", action: onOpenMain)
             Spacer()
-            Button { model.pinned.toggle() } label: {
-                Image(systemName: model.pinned ? "pin.fill" : "pin")
-                    .foregroundStyle(model.pinned ? Color.accentColor : Color.secondary)
-            }
-            .buttonStyle(.borderless)
-            .help(model.pinned ? "取消固定" : "固定后点别处不收起")
-            .accessibilityLabel(model.pinned ? "取消固定" : "固定面板")
+            // 文字按钮，和「设置」「退出」一个样子（图标和文字混排不协调，2026-11-24 用户要求）
+            Button(model.pinned ? "取消固定" : "固定") { model.pinned.toggle() }
+                .buttonStyle(.borderless)
+                .foregroundStyle(model.pinned ? Color.accentColor : Color.secondary)
+                .help(model.pinned ? "点别处会收起" : "固定后点别处不收起")
             Button("设置", action: onOpenSettings).buttonStyle(.borderless).foregroundStyle(.secondary)
             Button("退出", action: onQuit).buttonStyle(.borderless).foregroundStyle(.secondary)
         }
