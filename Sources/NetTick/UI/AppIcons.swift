@@ -11,7 +11,7 @@ enum AppIcons {
         let image: NSImage
         switch id.kind {
         case .other:
-            image = otherIcon()
+            image = id.key == AppIdentity.unrecordedKey ? unrecordedIcon() : otherIcon()
         case .system:
             image = NSWorkspace.shared.icon(forFile: "/System/Applications/System Settings.app")
         case .cli:
@@ -55,5 +55,22 @@ struct AppIconView: View {
             .resizable()
             .interpolation(.high)
             .frame(width: size, height: size)
+    }
+}
+
+/// 「NetTick 没运行时」的图标：和「其他」同样的灰色方块，中间是休眠的 zzz
+@MainActor
+private func unrecordedIcon() -> NSImage {
+    NSImage(size: NSSize(width: 32, height: 32), flipped: false) { r in
+        let box = r.insetBy(dx: 2.5, dy: 2.5)
+        NSColor(srgbRed: 0.6, green: 0.62, blue: 0.66, alpha: 1).setFill()
+        NSBezierPath(roundedRect: box, xRadius: 7, yRadius: 7).fill()
+        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+            .applying(.init(paletteColors: [.white]))
+        if let z = NSImage(systemSymbolName: "zzz", accessibilityDescription: nil)?.withSymbolConfiguration(config) {
+            let s = z.size
+            z.draw(in: NSRect(x: (r.width - s.width) / 2, y: (r.height - s.height) / 2, width: s.width, height: s.height))
+        }
+        return true
     }
 }

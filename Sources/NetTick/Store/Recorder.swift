@@ -37,6 +37,14 @@ final class Recorder: @unchecked Sendable {
     private(set) var todayTotals: [String: Bytes] = [:]
     /// 今天物理网卡的合计（App 合计以外的部分算「其他」）
     private(set) var todayIface = Bytes()
+    /// 这次开机以来各 App、网卡的累计（NetTick 运行期间记到的；没运行那段只有网卡计数知道总量）
+    private(set) var bootTotals: [String: Bytes] = [:]
+    private(set) var bootIface = Bytes()
+    /// 今天以前各 App 的合计和「其他」（按天算好的）。加上今天的就是「全部」；跨天时把今天并进来
+    private var beforeTodayTotals: [String: Bytes] = [:]
+    private var beforeTodayOther = Bytes()
+    private var pendingBootApp: [String: Bytes] = [:]
+    private var pendingBootIf = Bytes()
     private(set) var identities: [String: AppIdentity] = [:]
 
     /// 最近 1 小时，10 秒一格（速率曲线的「1 小时」用）
@@ -76,6 +84,11 @@ final class Recorder: @unchecked Sendable {
         db.prepare("SELECT app_key, rx, tx FROM daily WHERE day = ?")?.bind(today).rows { r in
             todayTotals[r.string(0) ?? ""] = Bytes(rx: UInt64(r.int(1)), tx: UInt64(r.int(2)))
         }
+        loadBoot()
+        db.prepare("SELECT app_key, SUM(rx), SUM(tx) FROM daily WHERE day < ? GROUP BY app_key")?.bind(today).rows { r in
+            beforeTodayTotals[r.string(0) ?? ""] = Bytes(rx: UInt64(r.int(1)), tx: UInt64(r.int(2)))
+        }
+        beforeTodayOther = db.otherBytes(from: "0000-01-01", to: Day.offset(today, -1))
         if let v = meta("first_launch"), let d = Double(v) {
             firstLaunch = d
         } else {
@@ -90,6 +103,59 @@ final class Recorder: @unchecked Sendable {
             setMeta("learn_until", String(learnUntil))
         }
         log("库已打开：认识 \(knownKeys.count) 个 App，今天已有 \(todayTotals.count) 个")
+    }
+
+    /// 这次开机第一次见到时（新开机，或者刚升级到有这个统计的版本），用还在的分钟数据补上开机后已经记下的部分。
+    /// 分钟数据只留 3 天，再早的补不回来，归到「NetTick 没运行时」
+    private func loadBoot() {
+        let boot = BootSession.id
+        var known = false
+        db.prepare("SELECT rx, tx FROM boot_if WHERE boot = ?")?.bind(boot).rows { r in
+            known = true
+            bootIface = Bytes(rx: UInt64(r.int(0)), tx: UInt64(r.int(1)))
+        }
+        if !known {
+            let since = Int(BootSession.bootTime.timeIntervalSince1970) / 60 * 60
+            db.transaction {
+                db.prepare("""
+                    INSERT INTO boot_app(boot, app_key, rx, tx)
+                    SELECT ?, app_key, SUM(rx), SUM(tx) FROM minute_app WHERE ts >= ? GROUP BY app_key
+                    """)?.bind(boot, since).run()
+                db.prepare("""
+                    INSERT INTO boot_if(boot, start, rx, tx)
+                    SELECT ?, ?, COALESCE(SUM(rx), 0), COALESCE(SUM(tx), 0) FROM minute_if WHERE ts >= ?
+                    """)?.bind(boot, BootSession.bootTime.timeIntervalSince1970, since).run()
+            }
+            db.prepare("SELECT rx, tx FROM boot_if WHERE boot = ?")?.bind(boot).rows { r in
+                bootIface = Bytes(rx: UInt64(r.int(0)), tx: UInt64(r.int(1)))
+            }
+        }
+        db.prepare("SELECT app_key, rx, tx FROM boot_app WHERE boot = ?")?.bind(boot).rows { r in
+            bootTotals[r.string(0) ?? ""] = Bytes(rx: UInt64(r.int(1)), tx: UInt64(r.int(2)))
+        }
+        log("开机于 \(BootSession.bootTime)，开机以来已记 \(Fmt.bytes(Double(bootIface.total)))（\(known ? "接着记" : "用分钟数据补上")）")
+    }
+
+    // MARK: - 汇总（采集队列上读）
+
+    /// 网卡比各 App 多出来的部分，按方向各自不小于 0
+    static func gap(_ iface: Bytes, _ apps: [String: Bytes]) -> Bytes {
+        let a = apps.values.reduce(Bytes()) { var x = $0; x += $1; return x }
+        return Bytes(rx: iface.rx > a.rx ? iface.rx - a.rx : 0, tx: iface.tx > a.tx ? iface.tx - a.tx : 0)
+    }
+
+    /// 「全部」各 App：今天以前 + 今天
+    var allTotals: [String: Bytes] {
+        var out = beforeTodayTotals
+        for (k, b) in todayTotals { out[k, default: Bytes()] += b }
+        return out
+    }
+
+    /// 「全部」里的「其他」：和排行页「全部」一样按天算（每天网卡减各 App，各自不小于 0）再加起来
+    var allOther: Bytes {
+        var o = beforeTodayOther
+        o += Self.gap(todayIface, todayTotals)
+        return o
     }
 
     private func meta(_ key: String) -> String? {
@@ -113,6 +179,8 @@ final class Recorder: @unchecked Sendable {
         pendingProc[DayAppProc(day: today, app: id.key, proc: proc), default: Bytes()] += b
         pendingMinuteApp[MinApp(ts: t / 60 * 60, app: id.key), default: Bytes()] += b
         todayTotals[id.key, default: Bytes()] += b
+        bootTotals[id.key, default: Bytes()] += b
+        pendingBootApp[id.key, default: Bytes()] += b
         buckets[bucketIndex(at: t)].apps[id.key, default: Bytes()] += b
 
         if identities[id.key] == nil || identities[id.key] != id { identities[id.key] = id }
@@ -135,6 +203,8 @@ final class Recorder: @unchecked Sendable {
         pendingMinuteIf[t / 60 * 60, default: Bytes()] += b
         pendingDailyIf[today, default: Bytes()] += b
         todayIface += b
+        bootIface += b
+        pendingBootIf += b
         buckets[bucketIndex(at: t)].iface += b
     }
 
@@ -157,6 +227,9 @@ final class Recorder: @unchecked Sendable {
     private func rollDayIfNeeded(_ now: Date) {
         let d = Day.key(now)
         if d != today {
+            // 今天结束：并进「今天以前」，「全部」不会在零点掉一截
+            for (k, b) in todayTotals { beforeTodayTotals[k, default: Bytes()] += b }
+            beforeTodayOther += Self.gap(todayIface, todayTotals)
             today = d
             todayTotals = [:]
             todayIface = Bytes()
@@ -172,14 +245,20 @@ final class Recorder: @unchecked Sendable {
         var dailyIf: [String: Bytes]
         var minuteApp: [MinApp: Bytes]
         var apps: [String: AppIdentity]
-        var isEmpty: Bool { daily.isEmpty && proc.isEmpty && minuteIf.isEmpty && dailyIf.isEmpty && minuteApp.isEmpty && apps.isEmpty }
+        var bootApp: [String: Bytes]
+        var bootIf: Bytes
+        var isEmpty: Bool {
+            daily.isEmpty && proc.isEmpty && minuteIf.isEmpty && dailyIf.isEmpty && minuteApp.isEmpty && apps.isEmpty
+                && bootApp.isEmpty && bootIf.total == 0
+        }
     }
 
     /// 采集队列上调用：取走内存里的增量
     private func takePending() -> Pending {
         let p = Pending(daily: pendingDaily, proc: pendingProc, minuteIf: pendingMinuteIf, dailyIf: pendingDailyIf,
-                        minuteApp: pendingMinuteApp, apps: pendingApps)
+                        minuteApp: pendingMinuteApp, apps: pendingApps, bootApp: pendingBootApp, bootIf: pendingBootIf)
         pendingDaily = [:]; pendingProc = [:]; pendingMinuteIf = [:]; pendingDailyIf = [:]; pendingMinuteApp = [:]; pendingApps = [:]
+        pendingBootApp = [:]; pendingBootIf = Bytes()
         return p
     }
 
@@ -219,6 +298,18 @@ final class Recorder: @unchecked Sendable {
                 ON CONFLICT(ts, app_key) DO UPDATE SET rx = rx + excluded.rx, tx = tx + excluded.tx
                 """) {
                 for (k, b) in p.minuteApp { s.bind(k.ts, k.app, b.rx, b.tx).run() }
+            }
+            if let s = db.prepare("""
+                INSERT INTO boot_app(boot, app_key, rx, tx) VALUES(?, ?, ?, ?)
+                ON CONFLICT(boot, app_key) DO UPDATE SET rx = rx + excluded.rx, tx = tx + excluded.tx
+                """) {
+                for (k, b) in p.bootApp { s.bind(BootSession.id, k, b.rx, b.tx).run() }
+            }
+            if p.bootIf.total > 0 {
+                db.prepare("""
+                    INSERT INTO boot_if(boot, start, rx, tx) VALUES(?, ?, ?, ?)
+                    ON CONFLICT(boot) DO UPDATE SET rx = rx + excluded.rx, tx = tx + excluded.tx
+                    """)?.bind(BootSession.id, BootSession.bootTime.timeIntervalSince1970, p.bootIf.rx, p.bootIf.tx).run()
             }
             if let s = db.prepare("""
                 INSERT INTO apps(key, name, kind, bundle_id, path, first_seen, last_seen) VALUES(?, ?, ?, ?, ?, ?, ?)

@@ -2,7 +2,8 @@ import Foundation
 
 /// 字节和速率的显示格式。十进制（1 KB = 1000 B），和访达一致；三位有效数字，末尾的 0 去掉。
 enum Fmt {
-    private static let units = ["B", "KB", "MB", "GB", "TB"]
+    /// 「全部」会一直涨：到 PB 为止都按三位有效数字换单位，数字宽度不会越变越长
+    private static let units = ["B", "KB", "MB", "GB", "TB", "PB"]
 
     /// 拆成数字和单位，菜单栏三列对齐要分开画。
     static func parts(_ value: Double) -> (number: String, unit: String) {
@@ -28,6 +29,15 @@ enum Fmt {
     static func rate(_ bytesPerSecond: Double) -> String {
         let p = parts(bytesPerSecond)
         return "\(p.number) \(p.unit)/s"
+    }
+
+    /// 时长：「2 天 3 小时」「3 小时 12 分」「12 分钟」
+    static func duration(_ seconds: TimeInterval) -> String {
+        let m = max(0, Int(seconds) / 60)
+        let d = m / 1440, h = m % 1440 / 60, mm = m % 60
+        if d > 0 { return h > 0 ? "\(d) 天 \(h) 小时" : "\(d) 天" }
+        if h > 0 { return mm > 0 ? "\(h) 小时 \(mm) 分" : "\(h) 小时" }
+        return "\(max(1, mm)) 分钟"
     }
 
     static func percent(_ x: Double) -> String {

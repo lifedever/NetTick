@@ -48,6 +48,13 @@ final class Database: @unchecked Sendable {   // 只在 Recorder 的 dbQueue 上
         CREATE TABLE IF NOT EXISTS minute_app(
             ts INTEGER NOT NULL, app_key TEXT NOT NULL, rx INTEGER NOT NULL, tx INTEGER NOT NULL,
             PRIMARY KEY(ts, app_key));
+        CREATE TABLE IF NOT EXISTS boot_app(
+            boot TEXT NOT NULL, app_key TEXT NOT NULL,
+            rx INTEGER NOT NULL DEFAULT 0, tx INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY(boot, app_key));
+        CREATE TABLE IF NOT EXISTS boot_if(
+            boot TEXT PRIMARY KEY, start REAL NOT NULL,
+            rx INTEGER NOT NULL DEFAULT 0, tx INTEGER NOT NULL DEFAULT 0);
         """)
         // 老库升级：daily_if 是后加的，用还在的分钟数据把这几天补上（分钟数据只留 3 天）
         var n = 0

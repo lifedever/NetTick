@@ -77,6 +77,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self.openMain(page) }
         } else if what == "popover" {
             liveModel.reveal()
+            // 开发用：`--debug-tab today|sinceBoot|all` 指定面板下半部分停在哪个标签（截图核对，不用点）
+            if let t = args.firstIndex(of: "--debug-tab"), t + 1 < args.count, let tab = TotalsTab(rawValue: args[t + 1]) {
+                liveModel.totalsTab = tab
+            }
             collector.setFastPolling(true)
             let w = NSWindow(contentRect: NSRect(x: 200, y: 200, width: PopoverMetrics.width, height: PopoverMetrics.initialHeight),
                              styleMask: [.titled, .closable], backing: .buffered, defer: false)

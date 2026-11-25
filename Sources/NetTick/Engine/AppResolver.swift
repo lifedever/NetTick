@@ -23,6 +23,10 @@ struct AppIdentity: Hashable {
     /// 「其他」：物理网卡的量减去所有 App 记到的量。统计接口只给当前用户的连接，root 和其他系统账户的进程
     /// （系统更新之类）看不到；代理、VPN 的加密开销也只出现在网卡上。都归到这一行，各行加起来等于网卡的量。
     static let other = AppIdentity(key: otherKey, name: "其他", kind: .other, bundleID: nil, path: "")
+
+    /// 「开机以来」里 NetTick 没运行的那段时间：网卡从开机起一直在计数，知道总量，分不出是哪个 App
+    static let unrecordedKey = "unrecorded"
+    static let unrecorded = AppIdentity(key: unrecordedKey, name: "NetTick 没运行时", kind: .other, bundleID: nil, path: "")
 }
 
 /// pid → AppIdentity。只在采集队列上调用。

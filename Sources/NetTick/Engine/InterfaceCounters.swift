@@ -1,11 +1,15 @@
 import Darwin
 import Foundation
 
-/// 物理网卡的累计收发字节（菜单栏的实时速率用它）。
+/// 物理网卡的累计收发字节（菜单栏的实时速率、开机以来的总量都用它）。计数从开机起累计，休眠唤醒不清零。
 ///
 /// 只算 en* 且类型是以太网（Wi-Fi、有线、USB 网卡都是）：utun 是代理 / VPN 的虚拟网卡，
 /// 开着 TUN 模式时 App 的流量会先进 utun 再从 en0 出去，两个都算就是双倍；lo0 是本机回环。
-/// 用 NET_RT_IFLIST2 取 64 位计数 —— getifaddrs 给的 if_data 是 32 位，4 GB 就回绕。
+///
+/// 用 IFMIB（net.link.generic.ifdata.<序号>.general）逐个网卡读 if_data64。
+/// 别用 NET_RT_IFLIST2：if_msghdr2 里虽然也是 if_data64，实测（2026-11-25，macOS 27）给 App 的值被截成 32 位，
+/// 每 4 GB 回绕（en0 实际 38.4 GB，读到 4.06 GB，正好是除以 2³² 的余数）；IFMIB 和 netstat -ib 一致。
+/// getifaddrs 给的 if_data 本来就是 32 位。
 enum InterfaceCounters {
 
     struct Totals {
@@ -14,43 +18,29 @@ enum InterfaceCounters {
     }
 
     static func read() -> Totals? {
-        var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, 0, NET_RT_IFLIST2, 0]
-        var len = 0
-        guard sysctl(&mib, 6, nil, &len, nil, 0) == 0, len > 0 else { return nil }
-        var buf = [UInt8](repeating: 0, count: len)
-        guard sysctl(&mib, 6, &buf, &len, nil, 0) == 0 else { return nil }
-
+        guard let list = if_nameindex() else { return nil }
+        defer { if_freenameindex(list) }
         var totals = Totals(rx: 0, tx: 0)
-        var offset = 0
-        buf.withUnsafeBytes { raw in
-            while offset + MemoryLayout<if_msghdr>.size <= len {
-                let base = raw.baseAddress!.advanced(by: offset)
-                let hdr = base.loadUnaligned(as: if_msghdr.self)
-                let msgLen = Int(hdr.ifm_msglen)
-                if msgLen <= 0 { break }
-                if Int32(hdr.ifm_type) == RTM_IFINFO2, offset + MemoryLayout<if_msghdr2>.size <= len {
-                    let h2 = base.loadUnaligned(as: if_msghdr2.self)
-                    if Int32(h2.ifm_data.ifi_type) == IFT_ETHER, isPhysical(index: Int(h2.ifm_index)) {
-                        totals.rx &+= h2.ifm_data.ifi_ibytes
-                        totals.tx &+= h2.ifm_data.ifi_obytes
-                    }
-                }
-                offset += msgLen
+        var any = false
+        var p = list
+        while p.pointee.if_index != 0 {
+            if let cname = p.pointee.if_name, String(cString: cname).hasPrefix("en"),
+               let d = ifData(index: Int32(p.pointee.if_index)), Int32(d.ifi_type) == IFT_ETHER {
+                totals.rx &+= d.ifi_ibytes
+                totals.tx &+= d.ifi_obytes
+                any = true
             }
+            p = p.advanced(by: 1)
         }
-        return totals
+        return any ? totals : nil
     }
 
-    private static var nameCache: [Int: Bool] = [:]
-    private static let lock = NSLock()
-
-    private static func isPhysical(index: Int) -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        if let c = nameCache[index] { return c }
-        let name = interfaceName(index)
-        let ok = name.hasPrefix("en")
-        nameCache[index] = ok
-        return ok
+    private static func ifData(index: Int32) -> if_data64? {
+        var mib: [Int32] = [CTL_NET, PF_LINK, NETLINK_GENERIC, IFMIB_IFDATA, index, IFDATA_GENERAL]
+        var data = ifmibdata()
+        var len = MemoryLayout<ifmibdata>.size
+        guard sysctl(&mib, 6, &data, &len, nil, 0) == 0 else { return nil }
+        return data.ifmd_data
     }
 }
 

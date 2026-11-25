@@ -140,6 +140,33 @@ extension Database {
         return out
     }
 
+    /// 「开机以来」的排行：各 App + 「其他」（NetTick 运行期间分不出是谁的）+「NetTick 没运行时」，
+    /// 加起来等于开机以来网卡的量。nicSinceBoot 是网卡现在的计数（从开机起累计）
+    func bootRanking(boot: String, nicSinceBoot: Bytes?) -> [AppTotal] {
+        let ids = identities()
+        var apps: [String: Bytes] = [:]
+        prepare("SELECT app_key, rx, tx FROM boot_app WHERE boot = ?")?.bind(boot)
+            .rows { apps[$0.string(0) ?? ""] = Bytes(rx: UInt64($0.int(1)), tx: UInt64($0.int(2))) }
+        var iface = Bytes()
+        prepare("SELECT rx, tx FROM boot_if WHERE boot = ?")?.bind(boot)
+            .rows { iface = Bytes(rx: UInt64($0.int(0)), tx: UInt64($0.int(1))) }
+        // 进程数按开机那天起的每日明细数，开机那天开机前的也算在里面（只用来写「N 个进程」）
+        var procCounts: [String: Int] = [:]
+        prepare("SELECT app_key, COUNT(DISTINCT proc) FROM daily_proc WHERE day >= ? GROUP BY app_key")?
+            .bind(Day.key(BootSession.bootTime)).rows { procCounts[$0.string(0) ?? ""] = Int($0.int(1)) }
+        var out = apps.map { key, b in
+            AppTotal(identity: ids[key] ?? AppIdentity(key: key, name: key, kind: .cli, bundleID: nil, path: ""),
+                     bytes: b, processCount: procCounts[key] ?? 1)
+        }
+        let other = Recorder.gap(iface, apps)
+        if other.total > 0 { out.append(AppTotal(identity: .other, bytes: other, processCount: 0)) }
+        if let nic = nicSinceBoot {
+            let missing = Bytes(rx: nic.rx > iface.rx ? nic.rx - iface.rx : 0, tx: nic.tx > iface.tx ? nic.tx - iface.tx : 0)
+            if missing.total > 0 { out.append(AppTotal(identity: .unrecorded, bytes: missing, processCount: 0)) }
+        }
+        return out.sorted { $0.bytes.total > $1.bytes.total }
+    }
+
     func firstDay() -> String? {
         var d: String?
         prepare("SELECT MIN(day) FROM daily")?.rows { d = $0.string(0) }

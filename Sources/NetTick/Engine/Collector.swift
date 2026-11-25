@@ -60,6 +60,9 @@ final class Collector: @unchecked Sendable {   // 状态只在 queue 上改
         var history: [Bytes] = []              // 最近 60 秒，每秒一格（字节/秒）
         var active: [AppRate] = []             // 正在用网的 App，按速率排
         var today: [(AppIdentity, Bytes)] = [] // 今天各 App
+        var sinceBoot: [(AppIdentity, Bytes)] = []  // 开机以来（含「NetTick 没运行时」，加起来等于网卡开机以来的计数）
+        var allTime: [(AppIdentity, Bytes)] = []    // 第一次运行以来
+        var firstLaunch: Double = 0
         var available = true                   // 按 App 统计能不能用（私有框架加载失败时 false）
     }
     private var history: [Bytes] = []
@@ -120,7 +123,8 @@ final class Collector: @unchecked Sendable {   // 状态只在 queue 上改
         if let cur = InterfaceCounters.read() {
             if let last = lastIface {
                 let dt = max(0.2, now.timeIntervalSince(lastIfaceAt))
-                // 网卡重置（休眠唤醒、插拔）时计数会变小，这一秒按 0 算
+                // 计数变小（拔掉 USB 网卡之类，那块网卡的计数跟着没了）时这一秒按 0 算。
+                // 以前读的是被截成 32 位的值，每 4 GB 回绕一次，看着像「休眠唤醒会清零」，其实不会
                 let d = Bytes(rx: cur.rx >= last.rx ? cur.rx - last.rx : 0, tx: cur.tx >= last.tx ? cur.tx - last.tx : 0)
                 recorder.addInterface(d, at: now)
                 history.append(Bytes(rx: UInt64(Double(d.rx) / dt), tx: UInt64(Double(d.tx) / dt)))
@@ -205,16 +209,27 @@ final class Collector: @unchecked Sendable {   // 状态只在 queue 上改
         live.tx = Double(history.last?.tx ?? 0)
         live.history = history
         live.active = active
-        var today: [(AppIdentity, Bytes)] = recorder.todayTotals.compactMap { key, b in
-            recorder.identities[key].map { ($0, b) }
+        let r = recorder
+        live.today = totalsList(r.todayTotals, other: Recorder.gap(r.todayIface, r.todayTotals))
+        // 开机以来：网卡计数从开机起累计，比 NetTick 记到的多出来的就是它没运行的那段
+        var missing = Bytes()
+        if let nic = lastIface {
+            missing = Bytes(rx: nic.rx > r.bootIface.rx ? nic.rx - r.bootIface.rx : 0,
+                            tx: nic.tx > r.bootIface.tx ? nic.tx - r.bootIface.tx : 0)
         }
-        let apps = recorder.todayTotals.values.reduce(Bytes()) { var x = $0; x += $1; return x }
-        let iface = recorder.todayIface
-        let other = Bytes(rx: iface.rx > apps.rx ? iface.rx - apps.rx : 0, tx: iface.tx > apps.tx ? iface.tx - apps.tx : 0)
-        if other.total > 0 { today.append((.other, other)) }
-        live.today = today.sorted { $0.1.total > $1.1.total }
+        live.sinceBoot = totalsList(r.bootTotals, other: Recorder.gap(r.bootIface, r.bootTotals), unrecorded: missing)
+        live.allTime = totalsList(r.allTotals, other: r.allOther)
+        live.firstLaunch = r.firstLaunch
         live.available = statsAvailable
         DispatchQueue.main.async { onLive(live) }
+    }
+
+    /// 各 App + 「其他」 +（开机以来才有的）「NetTick 没运行时」，按总量排
+    private func totalsList(_ apps: [String: Bytes], other: Bytes, unrecorded: Bytes = Bytes()) -> [(AppIdentity, Bytes)] {
+        var out: [(AppIdentity, Bytes)] = apps.compactMap { key, b in recorder.identities[key].map { ($0, b) } }
+        if other.total > 0 { out.append((.other, other)) }
+        if unrecorded.total > 0 { out.append((.unrecorded, unrecorded)) }
+        return out.sorted { $0.1.total > $1.1.total }
     }
 
     // MARK: - 连接

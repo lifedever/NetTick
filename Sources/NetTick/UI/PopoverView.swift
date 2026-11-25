@@ -7,6 +7,8 @@ final class LiveModel: ObservableObject {
     /// 关着时也记下最新一份（不触发界面），打开那一刻先填上：高度一出来就是对的，不会先矮后高
     var latest = Collector.Live()
     var isVisible = false
+    /// 面板下半部分看哪段时间的合计。每次打开面板都从「今天」开始，不记上次选的
+    @Published var totalsTab: TotalsTab = .today
     /// 面板固定：点别处不收起（记住，下次打开还是固定的）
     @Published var pinned = UserDefaults.standard.bool(forKey: "popoverPinned") {
         didSet { UserDefaults.standard.set(pinned, forKey: "popoverPinned") }
@@ -24,11 +26,23 @@ final class LiveModel: ObservableObject {
 
     func reveal() {
         live = latest
+        totalsTab = .today
         isVisible = true
     }
 }
 
 /// 面板内容的实际高度（面板跟着它变高变矮，不留空白）
+enum TotalsTab: String, CaseIterable {
+    case today, sinceBoot, all
+    var title: String {
+        switch self {
+        case .today: return "今天"
+        case .sinceBoot: return "开机以来"
+        case .all: return "全部"
+        }
+    }
+}
+
 struct PopoverHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
@@ -49,7 +63,7 @@ struct PopoverView: View {
             Divider()
             activeSection
             Divider()
-            todaySection
+            totalsSection
             Divider()
             footer
         }
@@ -114,17 +128,41 @@ struct PopoverView: View {
         .padding(.horizontal, 16).padding(.vertical, 12)
     }
 
-    // MARK: 今天
+    // MARK: 今天 / 开机以来 / 全部
 
-    private var todaySection: some View {
-        let rows = live.today
+    private var totalsSection: some View {
+        let tab = model.totalsTab
+        let rows: [(AppIdentity, Bytes)] = {
+            switch tab {
+            case .today: return live.today
+            case .sinceBoot: return live.sinceBoot
+            case .all: return live.allTime
+            }
+        }()
         let total = rows.reduce(Bytes()) { var b = $0; b += $1.1; return b }
         let top = Array(rows.prefix(5))
         let maxTotal = Double(top.first?.1.total ?? 0)
         return VStack(alignment: .leading, spacing: 4) {
-            SectionLabel(title: "今天")
+            HStack(spacing: 4) {
+                ForEach(TotalsTab.allCases, id: \.self) { t in
+                    Button { model.totalsTab = t } label: {
+                        Text(t.title)
+                            .font(.system(size: 11, weight: t == tab ? .semibold : .regular))
+                            .foregroundStyle(t == tab ? Color.primary : Color.secondary)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Capsule().fill(t == tab ? Color.primary.opacity(0.08) : Color.clear))
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer(minLength: 8)
+                if let note = totalsNote(tab) {
+                    Text(note).font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()
+                }
+            }
+            .padding(.leading, -7)   // 选中的胶囊底往左探出去，文字和别的小标题左边对齐
             HStack(alignment: .firstTextBaseline, spacing: 14) {
-                Text(Fmt.bytes(Double(total.total))).font(.system(size: 20, weight: .semibold))
+                Text(Fmt.bytes(Double(total.total))).font(.system(size: 20, weight: .semibold)).monospacedDigit()
                 Legend(color: Theme.upload, text: "↑ \(Fmt.bytes(Double(total.tx)))")
                 Legend(color: Theme.download, text: "↓ \(Fmt.bytes(Double(total.rx)))")
             }
@@ -148,6 +186,22 @@ struct PopoverView: View {
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
+    }
+
+    /// 标题右边的小字：开机多久了、从哪天开始统计
+    private func totalsNote(_ tab: TotalsTab) -> String? {
+        switch tab {
+        case .today:
+            return nil
+        case .sinceBoot:
+            return "已开机 \(Fmt.duration(Date().timeIntervalSince(BootSession.bootTime)))"
+        case .all:
+            guard live.firstLaunch > 0 else { return nil }
+            let d = Date(timeIntervalSince1970: live.firstLaunch)
+            let c = Calendar.current.dateComponents([.year, .month, .day], from: d)
+            let thisYear = Calendar.current.component(.year, from: Date())
+            return c.year == thisYear ? "从 \(c.month!) 月 \(c.day!) 日起" : "从 \(c.year!) 年 \(c.month!) 月 \(c.day!) 日起"
+        }
     }
 
     // MARK: 底栏

@@ -3,10 +3,10 @@ import SwiftUI
 
 /// 时间段
 enum Period: Hashable {
-    case today, yesterday, last7, last30, all
+    case today, yesterday, last7, last30, sinceBoot, all
     case day(String)
 
-    static let presets: [Period] = [.today, .yesterday, .last7, .last30, .all]
+    static let presets: [Period] = [.today, .yesterday, .last7, .last30, .sinceBoot, .all]
 
     var title: String {
         switch self {
@@ -14,6 +14,7 @@ enum Period: Hashable {
         case .yesterday: return "昨天"
         case .last7: return "近 7 天"
         case .last30: return "近 30 天"
+        case .sinceBoot: return "开机以来"
         case .all: return "全部"
         case .day(let d): return Self.dayTitle(d)
         }
@@ -27,6 +28,7 @@ enum Period: Hashable {
         case .yesterday: let y = Day.offset(today, -1); return (y, y)
         case .last7: return (Day.offset(today, -6), today)
         case .last30: return (Day.offset(today, -29), today)
+        case .sinceBoot: return (min(Day.key(BootSession.bootTime), today), today)   // 明细的柱子和进程按天取，开机那天算整天
         case .all: return (firstDay ?? today, today)
         case .day(let d): return (d, d)
         }
@@ -35,6 +37,7 @@ enum Period: Hashable {
     var isSingleDay: Bool {
         switch self {
         case .today, .yesterday, .day: return true
+        case .sinceBoot: return Day.key(BootSession.bootTime) == Day.key()
         default: return false
         }
     }
@@ -68,7 +71,15 @@ final class RankModel: ObservableObject {
     private(set) var loaded = false
 
     private unowned let data: MainData
-    init(data: MainData) { self.data = data }
+    init(data: MainData) {
+        self.data = data
+        // 开发用：`--debug-period sinceBoot|all|last7|…` 打开排行页时直接选这个时间段（截图核对，不用点）
+        let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "--debug-period"), i + 1 < args.count,
+           let p = Period.presets.first(where: { "\($0)" == args[i + 1] }) {
+            period = p
+        }
+    }
 
     var sorted: [AppTotal] {
         rows.sorted {
@@ -84,6 +95,10 @@ final class RankModel: ObservableObject {
         let p = period
         data.query({ db -> (String?, [AppTotal]) in
             let first = db.firstDay()
+            if p == .sinceBoot {
+                let nic = InterfaceCounters.read().map { Bytes(rx: $0.rx, tx: $0.tx) }
+                return (first, db.bootRanking(boot: BootSession.id, nicSinceBoot: nic))
+            }
             let r = p.range(firstDay: first)
             return (first, db.ranking(from: r.from, to: r.to))
         }) { [weak self] first, rows in
@@ -269,7 +284,8 @@ private struct RankRow: View {
     private var subtitle: String? {
         switch row.identity.kind {
         case .system: return "\(row.processCount) 个进程"
-        case .other: return "系统进程、代理和 VPN 的开销"
+        case .other:
+            return row.identity.key == AppIdentity.unrecordedKey ? "开机后 NetTick 没运行的那段" : "系统进程、代理和 VPN 的开销"
         case .cli: return "命令行程序"
         case .app: return row.processCount > 1 ? "\(row.processCount) 个进程" : nil
         }
@@ -316,6 +332,21 @@ private struct AppDetail: View {
                         .font(.system(size: 12)).foregroundStyle(.secondary)
                 }
             }
+            if app.identity.key == AppIdentity.unrecordedKey {
+                Text("开机后 NetTick 还没打开、或者中途退出过的那段时间。网卡从开机起一直在计数，所以知道总量，但分不出是哪个 App。")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            } else {
+                usage
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 14)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Theme.tile))
+    }
+
+    @ViewBuilder private var usage: some View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(period.isSingleDay ? "每小时" : "每天").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
                 if let note = detail?.note {
@@ -346,10 +377,6 @@ private struct AppDetail: View {
                 }
             }
             Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 16).padding(.vertical, 14)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Theme.tile))
     }
 }
 
