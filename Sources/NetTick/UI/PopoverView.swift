@@ -156,7 +156,7 @@ struct PopoverView: View {
         HStack(spacing: 8) {
             Button("打开主窗口", action: onOpenMain)
             Spacer()
-            // 文字按钮，和「设置」「退出」一个样子（图标和文字混排不协调，2026-11-24 用户要求）
+            // 文字按钮，和「设置」「退出」一个样子（图标和文字混排不协调）
             Button(model.pinned ? "取消固定" : "固定") { model.pinned.toggle() }
                 .buttonStyle(.borderless)
                 .foregroundStyle(model.pinned ? Color.accentColor : Color.secondary)

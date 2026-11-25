@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// App 图标缓存。NSWorkspace.icon 不便宜（swift-rules：行 body 里的系统调用默认当贵的处理），按 key 缓存一次。
+/// App 图标缓存。NSWorkspace.icon 不便宜，列表每次重绘都会取，按 key 缓存一次。
 @MainActor
 enum AppIcons {
     private static var cache: [String: NSImage] = [:]
@@ -15,7 +15,7 @@ enum AppIcons {
         case .system:
             image = NSWorkspace.shared.icon(forFile: "/System/Applications/System Settings.app")
         case .cli:
-            // 一律用「可执行文件」图标：Claude Code 这类按版本号命名的可执行文件（2.1.331）会被当成 .331 文档
+            // 一律用「可执行文件」图标：按版本号命名的可执行文件（比如 2.1.331）会被当成 .331 文档
             image = NSWorkspace.shared.icon(forFile: "/bin/ls")
         case .app:
             if !id.path.isEmpty, FileManager.default.fileExists(atPath: id.path) {

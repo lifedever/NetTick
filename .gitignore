@@ -1,8 +1,3 @@
-# AI 助手相关文件
-CLAUDE.md
-AGENTS.md
-.claude/
-
 # Swift / SwiftPM
 .build/
 .swiftpm/

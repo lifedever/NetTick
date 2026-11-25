@@ -45,7 +45,7 @@ func sym<T>(_ name: String, _ type: T.Type) -> T {
     guard let p = dlsym(nsHandle, name) else { log("缺符号 \(name)"); exit(1) }
     return unsafeBitCast(p, to: type)
 }
-// block 参数必须标 @escaping，否则回调触发时崩溃（见记忆 reference-macos-per-app-traffic-api）
+// block 参数必须标 @escaping，否则回调触发时崩溃
 typealias CreateFn = @convention(c) (CFAllocator?, DispatchQueue, @escaping @convention(block) (Ref, Ref?) -> Void) -> Ref?
 typealias AddFn = @convention(c) (Ref) -> Int32
 typealias QueryFn = @convention(c) (Ref, @escaping @convention(block) () -> Void) -> Void

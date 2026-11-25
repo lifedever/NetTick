@@ -132,7 +132,7 @@ final class AppResolver {
         return AppIdentity(key: "cli:" + name, name: name, kind: .cli, bundleID: nil, path: path)
     }
 
-    /// 命令行程序的名字。可执行文件按版本号命名的（Claude Code 装在 …/claude/versions/2.1.331），
+    /// 命令行程序的名字。可执行文件按版本号命名的（比如装在 …/<名字>/versions/2.1.331），
     /// 往上找第一个不像版本号、也不是 versions / bin 的目录名。
     static func cliName(_ path: String) -> String {
         var comps = (path as NSString).pathComponents

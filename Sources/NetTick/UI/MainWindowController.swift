@@ -3,7 +3,7 @@ import SwiftUI
 
 enum MainPage: String, CaseIterable, Identifiable {
     case rank, curve, month
-    // 设置拆成五页放侧栏（2026-11-25 用户要求，别一长页往下拉）
+    // 设置拆成五页放侧栏
     case general, menuBar = "menubar", notifications = "notify", data, about
 
     static let statsPages: [MainPage] = [.rank, .curve, .month]
@@ -65,7 +65,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         let root = MainView(nav: nav, data: MainData(recorder: recorder))
         let host = NSHostingController(rootView: root)
         // 窗口最小尺寸跟着 SwiftUI 声明的最小尺寸走（MainView 的 minWidth / minHeight）。
-        // 只设 window.minSize 拦不住：用户照样能缩到比内容窄，内容就左右两边一起溢出（2026-11-24 用户截图）
+        // 只设 window.minSize 拦不住：用户照样能缩到比内容窄，内容就左右两边一起溢出
         host.sizingOptions = [.minSize]
         // 让 SwiftUI 的 .toolbar / .navigationTitle 落到这个 NSWindow 的原生工具栏上（macOS 14+）
         host.sceneBridgingOptions = [.toolbars, .title]
@@ -89,7 +89,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         guard let i = args.firstIndex(of: "--debug-size"), i + 1 < args.count else { return }
         let parts = args[i + 1].split(separator: "x").compactMap { Double($0) }
         guard parts.count == 2 else { return }
-        // 调试尺寸别存进「上次的大小」：不然截一轮图，用户下次打开就是这个尺寸（2026-11-25 踩过）
+        // 调试尺寸别存进「上次的大小」：不然截一轮图，下次正常打开就是这个尺寸
         window.setFrameAutosaveName("")
         window.setContentSize(NSSize(width: parts[0], height: parts[1]))
         log("调试尺寸：请求 \(args[i + 1])，实际内容区 \(NSStringFromSize(window.contentLayoutRect.size))")

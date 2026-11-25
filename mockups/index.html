@@ -412,7 +412,7 @@ function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let
 
 /* ---------- 样例数据（今天） ---------- */
 const APPS = [
-  { id: 'claude', name: 'claude', sub: '命令行程序', icon: 'exec', down: 142e6, up: 2.55e9, px: 1 },
+  { id: 'rsync', name: 'rsync', sub: '命令行程序', icon: 'exec', down: 142e6, up: 2.55e9, px: 1 },
   { id: 'chrome', name: 'Google Chrome', sub: '5 个进程', icon: 'chrome', down: 1.86e9, up: 126e6, px: .38 },
   { id: 'system', name: '系统服务', sub: '9 个进程', icon: 'system', down: 1.21e9, up: 362e6, px: .04, group: true },
   { id: 'uu', name: 'UU远程', icon: 'uu', down: 98.6e6, up: 591e6, px: 0 },
@@ -429,7 +429,7 @@ T.total = T.down + T.up; T.dr = T.total - T.px;
 const byId = Object.fromEntries(APPS.map(a => [a.id, a]));
 const NOW = { down: 936e3, up: 1.98e6 };
 const ACTIVE = [
-  { a: 'claude', up: 1.9e6, down: 12e3 },
+  { a: 'rsync', up: 1.9e6, down: 12e3 },
   { a: 'chrome', down: 820e3, up: 34e3 },
   { a: 'wechat', down: 96e3, up: 8e3 },
 ];
@@ -625,8 +625,8 @@ function rateChart(data, range, w, h, sel) {
 }
 /* 选中那一刻的 App 构成：样例里按比例拆 */
 function breakdown(p, big) {
-  const dShare = big ? { chrome: .955, system: .03, wechat: .01, '1password': .005 } : { chrome: .58, wechat: .16, system: .16, claude: .06, '1password': .04 };
-  const uShare = p.u > 5e5 ? { claude: .9, chrome: .05, uu: .05 } : { chrome: .4, claude: .3, wechat: .2, uu: .1 };
+  const dShare = big ? { chrome: .955, system: .03, wechat: .01, '1password': .005 } : { chrome: .58, wechat: .16, system: .16, rsync: .06, '1password': .04 };
+  const uShare = p.u > 5e5 ? { rsync: .9, chrome: .05, uu: .05 } : { chrome: .4, rsync: .3, wechat: .2, uu: .1 };
   const ids = new Set([...Object.keys(dShare), ...Object.keys(uShare)]);
   return [...ids].map(id => ({ a: byId[id], d: p.d * (dShare[id] || 0), u: p.u * (uShare[id] || 0) }))
     .filter(x => x.d + x.u > 1e3).sort((a, b) => (b.d + b.u) - (a.d + a.u)).slice(0, 6);
@@ -706,7 +706,7 @@ function monthChart(days, w, h) {
 function monthPage() {
   const days = monthData().filter(Boolean);
   const D = days.reduce((a, x) => a + x.d, 0), U = days.reduce((a, x) => a + x.u, 0), tot = D + U, pxShare = .43;
-  const top = [['claude', .30, 1], ['chrome', .27, .41], ['system', .14, .05], ['uu', .105, 0], ['wechat', .056, 0], ['viscosity', .035, 0], ['wps', .013, 0], ['1password', .002, 1]];
+  const top = [['rsync', .30, 1], ['chrome', .27, .41], ['system', .14, .05], ['uu', .105, 0], ['wechat', .056, 0], ['viscosity', .035, 0], ['wps', .013, 0], ['1password', .002, 1]];
   const tmax = top[0][1];
   const tb = `<h1>月报</h1><span class="spacer"></span><button class="btn small">‹</button><b style="font-weight:600">2026 年 11 月</b><button class="btn small" disabled style="opacity:.4">›</button>`;
   const body = `<div class="tiles">

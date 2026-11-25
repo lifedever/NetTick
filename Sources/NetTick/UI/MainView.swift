@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// 主窗口要的数据入口：查询都经 Recorder 走 dbQueue，结果回主线程。
-/// 各页的数据模型挂在这里，和窗口同寿命：切页时直接显示上次的内容、后台再刷新，不会先空一下再出来（2026-11-24 用户反馈切页闪）。
+/// 各页的数据模型挂在这里，和窗口同寿命：切页时直接显示上次的内容、后台再刷新，不会先空一下再出来。
 @MainActor
 final class MainData: ObservableObject {
     let recorder: Recorder
@@ -44,14 +44,14 @@ struct MainView: View {
     @ObservedObject var nav: MainNav
     let data: MainData
 
-    /// 侧栏宽度：拖完记下来，下次打开用这个宽度（2026-11-25 用户要求；NavigationSplitView 自己不存）。
+    /// 侧栏宽度：拖完记下来，下次打开用这个宽度（NavigationSplitView 自己不存）。
     /// 只在建视图时读一次当 ideal，拖的过程中不回写 ideal，免得和拖拽打架
     @State private var sidebarIdeal = MainView.savedSidebarWidth
     /// 最宽就是默认的 210：窗口最窄 920 时内容区要 710，侧栏再宽排行表的 App 名就截成「cla…」（侧栏 240 实测）。
     /// 想放宽上限，窗口最小宽度得跟着加（minSize 是按默认侧栏 + 内容区算的）
     static let sidebarRange: ClosedRange<CGFloat> = 170...defaultSidebarWidth
     private static let sidebarKey = "sidebarWidth"
-    /// 第一次打开的侧栏宽度（2026-11-25 用户截图定的：窗口 920×640 + 侧栏 210）
+    /// 第一次打开的侧栏宽度（配合默认窗口 920×640）
     static let defaultSidebarWidth: CGFloat = 210
     private static var savedSidebarWidth: CGFloat {
         let w = CGFloat(UserDefaults.standard.double(forKey: sidebarKey))
@@ -96,11 +96,11 @@ struct MainView: View {
 
     /// 侧栏 210 时右边内容区要的宽度：排行页表格约 450 + 明细 220 + 边距（900 宽、侧栏 210 实测 App 名截得没法看）。
     /// 只用来算窗口最小宽度，**别加到内容区的 minWidth 上**：和侧栏上限 240 冲突，窗口最窄时一拖侧栏，
-    /// 侧栏列表整体左移、图标被切掉（2026-11-25 用户截图，复现：记的侧栏 240 + 窗口 920）
+    /// 侧栏列表整体左移、图标被切掉（复现：记的侧栏 240 + 窗口 920）
     static let detailMinWidth: CGFloat = 710
-    /// 整个窗口内容区的最小尺寸 = 默认侧栏 + 内容区要的宽度，也就是用户定的默认大小；
-    /// 高度 640 是月报页撑的（三个数字卡 + 图表最低 200 + 前几名 App）。2026-11-25 用户嫌默认窗口大，从 1000×640 收到这个
+    /// 整个窗口内容区的最小尺寸 = 默认侧栏 + 内容区要的宽度，也就是默认大小；
+    /// 高度 640 是月报页撑的（三个数字卡 + 图表最低 200 + 前几名 App）。
     static let minSize = NSSize(width: defaultSidebarWidth + detailMinWidth, height: 640)
-    /// 第一次打开的大小（2026-11-25 用户截图定的；之后按上次调过的大小，见 MainWindowController 的 autosave）
+    /// 第一次打开的大小（之后按上次调过的大小，见 MainWindowController 的 autosave）
     static let defaultSize = NSSize(width: 920, height: 640)
 }

@@ -7,7 +7,7 @@ final class Database: @unchecked Sendable {   // 只在 Recorder 的 dbQueue 上
     private var db: OpaquePointer?
     let url: URL
 
-    /// 库放在 Application Support/<bundle id>/ 下（swift-rules：别放根目录，和别的 App 撞名）
+    /// 库放在 Application Support/<bundle id>/ 下（别放根目录，和别的 App 撞名）
     static func defaultURL() -> URL {
         let bundleID = Bundle.main.bundleIdentifier ?? "com.lifedever.NetTick"
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]

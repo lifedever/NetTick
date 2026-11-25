@@ -3,7 +3,7 @@ import Foundation
 
 /// 私有框架 NetworkStatistics 的桥接：系统对每条 TCP / UDP 连接记的收发字节。
 ///
-/// 实测（2026-11-24，见项目 CLAUDE.md「取数方式」）：
+/// 实测（2026-11-24）：
 /// - 不需要私有权限，但只给**当前用户**的进程的连接；root 和系统账户的收不到。
 /// - 启动前就建立的连接也会报上来，计数从连接建立时累计 —— 调用方要自己记基线。
 /// - `startAbsoluteTime` 计入睡眠时间，换算用 `mach_continuous_time()`。

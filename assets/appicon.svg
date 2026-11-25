@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <!-- 2026-11-24 用户从极简方案里选的 M4「半圆对接」：白底（参考 Chrome）+ 上半圆橙（上传）、下半圆蓝（下载），中间留一道白缝。
+  <!-- M4「半圆对接」：白底（参考 Chrome）+ 上半圆橙（上传）、下半圆蓝（下载），中间留一道白缝。
        备选方案和对比图在 assets/icon-options/ -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#eceef2"/></linearGradient>

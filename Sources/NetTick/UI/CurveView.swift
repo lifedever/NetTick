@@ -180,7 +180,7 @@ struct CurveView: View {
             }
             if let hov, hov.t != sel?.t {
                 // 提示框放在竖线旁边、贴着图表顶，横竖都限制在图表里（靠右边时往左挪）。
-                // 放在竖线正上方会冒出图表、被窗口裁掉（2026-11-24 用户指出）
+                // 放在竖线正上方会冒出图表、被窗口裁掉
                 RuleMark(x: .value("时间", hov.t)).foregroundStyle(Color.secondary.opacity(0.5))
                     .annotation(position: .trailing, alignment: .top, spacing: 8,
                                 overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {

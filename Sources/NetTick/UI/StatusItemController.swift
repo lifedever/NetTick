@@ -4,7 +4,7 @@ import SwiftUI
 
 /// 菜单栏：上下两行速率（上传在上、下载在下），点开是面板。
 ///
-/// 三列对齐：箭头靠左、数字靠右、单位靠左（2026-11-24 用户指出整体右对齐时两行箭头错位）。
+/// 三列对齐：箭头靠左、数字靠右、单位靠左（整体右对齐时两行箭头会错位）。
 /// 宽度固定，数字跳动时不挤动旁边的图标。
 @MainActor
 final class StatusItemController: NSObject, NSPopoverDelegate {
@@ -146,7 +146,7 @@ final class RatesRenderer {
     }
 
     /// macOS 27 上 monospacedDigitSystemFont 偶尔真返回 nil（声明是非空，Swift 不检查），
-    /// nil 进了文字属性就闪退（swift-rules #11）。建一次缓存住，拿到 nil 用系统字体顶。
+    /// nil 进了文字属性就闪退。建一次缓存住，拿到 nil 用系统字体顶。
     private static func makeFont() -> NSFont {
         let f = NSFont.monospacedDigitSystemFont(ofSize: 9.5, weight: .medium)
         if unsafeBitCast(f, to: UnsafeRawPointer?.self) == nil {

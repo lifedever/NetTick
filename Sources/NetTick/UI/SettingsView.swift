@@ -7,9 +7,9 @@ enum AppLinks {
     static let sponsor = URL(string: "https://www.lifedever.com")!
 }
 
-// 设置拆成侧栏里的五页（2026-11-25 用户要求：侧栏空着，别一长页往下拉）：通用 / 菜单栏 / 通知 / 数据 / 关于。
+// 设置拆成侧栏里的五页：通用 / 菜单栏 / 通知 / 数据 / 关于。
 // 每页都是系统原生的分组表单（和系统设置一个样子）；关于页居中排，放版本、检查更新、赞助支持。
-// 表单别限宽：限了右边留一大块白，连工具栏分隔线都断在那儿（2026-11-24 用户指出）。
+// 表单别限宽：限了右边留一大块白，连工具栏分隔线都断在那儿。
 
 // MARK: - 通用
 
@@ -123,7 +123,7 @@ private struct MenuBarSample: View {
     }
 }
 
-/// 预览图只画一次：RatesRenderer 每建一个就要造一次字体（swift-rules #11，别在重绘里造）
+/// 预览图只画一次：RatesRenderer 每建一个就要造一次字体，别在重绘里造（见 RatesRenderer.makeFont）
 @MainActor
 private enum MenuBarPreview {
     private static var cache: [Bool: NSImage] = [:]
