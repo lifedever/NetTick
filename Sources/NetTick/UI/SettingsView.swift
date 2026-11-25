@@ -307,7 +307,8 @@ struct DataSettingsView: View {
 
 // MARK: - 关于
 
-/// 居中排：图标、名字、版本和更新状态，下面「检查更新」「赞助支持」（按钮组合照 TabFlick 的关于页）
+/// 居中排：图标、名字、版本和更新状态，下面「检查更新」「赞助支持」（按钮组合照 TabFlick 的关于页）。
+/// 有新版本时「检查更新」换成「更新到 x.y.z」，点了弹更新窗口；更新通知点开也是到这一页
 struct AboutView: View {
     @ObservedObject private var updates = UpdateChecker.shared
 
@@ -333,8 +334,13 @@ struct AboutView: View {
             .monospacedDigit()
             .padding(.top, 12)
             HStack(spacing: 10) {
-                Button("检查更新") { updates.check(userInitiated: true) }
-                    .disabled(updates.status == .checking || updates.isDownloading)
+                if let r = updates.availableRelease {
+                    Button("更新到 \(r.version)") { updates.showDialog = true }
+                        .buttonStyle(.borderedProminent)
+                } else {
+                    Button("检查更新") { updates.check(userInitiated: true) }
+                        .disabled(updates.status == .checking || updates.isDownloading)
+                }
                 Button { NSWorkspace.shared.open(AppLinks.sponsor) } label: {
                     Label {
                         Text("赞助支持")
@@ -352,6 +358,7 @@ struct AboutView: View {
                 .padding(.bottom, 20)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .sheet(isPresented: $updates.showDialog) { UpdateDialog(updates: updates) }
     }
 
     @ViewBuilder private var statusView: some View {
@@ -365,9 +372,9 @@ struct AboutView: View {
         case .upToDate:
             Text("·")
             Text("已是最新版本")
-        case .available(let v):
+        case .available(let r):
             Text("·")
-            Text("有新版本 \(v)").foregroundStyle(Color.accentColor)
+            Text("有新版本 \(r.version)").foregroundStyle(Color.accentColor)
         case .failed(let m):
             Text("·")
             Text("检查失败").help(m)

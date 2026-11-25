@@ -1,10 +1,15 @@
 import AppKit
 import Security
 import SwiftUI
+import UserNotifications
 
 /// 从 GitHub Releases 检查并自动安装新版本（照 TabFlick 的更新器）：
 /// 找当前架构的 DMG → 下载并核对字节数 → 挂载 → 核对包里的 App（bundle id、版本号、同一张证书签的）
 /// → 退出 → 外部脚本等旧进程真退出后整体换掉 Contents → 重新打开。
+///
+/// 怎么提醒：自动检查（每天一次）发现新版本只发系统通知，同一版只发一次；点通知打开「关于」页，
+/// 那里的「更新到 x.y.z」才弹更新窗口（UpdateDialog：写着更新内容，立即更新，装完自动重启）。
+/// 手动检查（关于页按钮、App 菜单）有新版本直接弹更新窗口，没有就在关于页上写状态。
 ///
 /// 和 TabFlick 不同的地方：
 /// - 不是固定 sleep 2 秒：NetTick 退出前要写库，旧进程还在时打开新的，两个实例会往同一个库里重复记账。
@@ -16,22 +21,41 @@ final class UpdateChecker: ObservableObject {
 
     static let repo = "lifedever/NetTick"
     static var releasesPage: URL { URL(string: "https://github.com/\(repo)/releases/latest")! }
+    /// 更新通知的 identifier 前缀：点通知时靠它认出是更新通知
+    static let notificationPrefix = "update-"
 
     private static let autoKey = "autoCheckUpdates"
     private static let lastCheckKey = "lastUpdateCheck"
-    private static let skippedKey = "skippedUpdateVersion"
+    private static let notifiedKey = "notifiedUpdateVersion"
     private static let interval: TimeInterval = 24 * 3600
+
+    struct Release: Equatable {
+        let version: String
+        /// GitHub Release 的说明（Markdown）
+        let notes: String
+        /// 当前架构的 DMG；这一版漏传了就是 nil，只能去发布页手动下载
+        let assetURL: URL?
+        let assetSize: Int64
+    }
 
     enum Status: Equatable {
         case idle, checking, upToDate
-        case available(String)
+        case available(Release)
         case failed(String)
     }
 
     @Published private(set) var status: Status = .idle
+    /// 关于页上的更新窗口（sheet）开没开
+    @Published var showDialog = false
     @Published private(set) var isDownloading = false
     @Published private(set) var downloadProgress: Double = 0
-    @Published private(set) var pendingVersion = ""
+    /// 下载或安装失败的原因，显示在更新窗口里
+    @Published private(set) var installError: String?
+
+    var availableRelease: Release? {
+        if case .available(let r) = status { return r }
+        return nil
+    }
 
     var autoCheck: Bool {
         get { UserDefaults.standard.object(forKey: Self.autoKey) as? Bool ?? true }
@@ -45,7 +69,6 @@ final class UpdateChecker: ObservableObject {
     private var downloadTask: URLSessionDownloadTask?
     private var downloadSession: URLSession?
     private var downloadCancelled = false
-    private var progressWindow: NSWindow?
     private var timer: Timer?
 
     // MARK: 检查
@@ -69,6 +92,7 @@ final class UpdateChecker: ObservableObject {
         check(userInitiated: false)
     }
 
+    /// userInitiated：关于页的按钮、App 菜单。有新版本直接弹更新窗口；自动检查只发通知
     func check(userInitiated: Bool) {
         guard status != .checking, !isDownloading else { return }
         status = .checking
@@ -79,18 +103,43 @@ final class UpdateChecker: ObservableObject {
             case .failure(let message):
                 log("检查更新失败：\(message)")
                 status = .failed(message)
-                if userInitiated { presentFailure(message) }
-            case .success(let latest):
-                guard Self.isNewer(latest.version, than: currentVersion) else {
+            case .success(let release):
+                guard Self.isNewer(release.version, than: currentVersion) else {
                     status = .upToDate
-                    if userInitiated { presentUpToDate() }
                     return
                 }
-                log("有新版本 \(latest.version)")
-                status = .available(latest.version)
-                // 自动检查尊重「跳过这一版」，手动检查总是弹
-                if userInitiated || latest.version != UserDefaults.standard.string(forKey: Self.skippedKey) {
-                    presentAvailable(latest)
+                log("有新版本 \(release.version)")
+                status = .available(release)
+                if userInitiated {
+                    installError = nil
+                    showDialog = true
+                } else {
+                    notify(release)
+                }
+            }
+        }
+    }
+
+    // MARK: 通知
+
+    /// 同一版只通知一次：点开以后关于页一直挂着「更新到 x.y.z」，不用天天提醒
+    private func notify(_ release: Release) {
+        guard UserDefaults.standard.string(forKey: Self.notifiedKey) != release.version else { return }
+        let title = "有新版本 \(release.version)"
+        let body = "当前版本 \(currentVersion)，点开看这一版改了什么。"
+        let id = Self.notificationPrefix + release.version, version = release.version, key = Self.notifiedKey
+        // 关掉了「新程序联网通知」的话之前没要过授权，这里要一次（系统只弹一次）。闭包里只带字符串，现场建请求
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { log("更新通知没发：没有通知权限"); return }
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil)) { error in
+                if let error {
+                    log("更新通知发送失败：\(error.localizedDescription)")
+                } else {
+                    UserDefaults.standard.set(version, forKey: key)
+                    log("已发更新通知：\(version)")
                 }
             }
         }
@@ -98,15 +147,8 @@ final class UpdateChecker: ObservableObject {
 
     // MARK: 网络
 
-    private struct Latest {
-        let version: String
-        /// 当前架构的 DMG；这一版漏传了就是 nil，退回发布页
-        let assetURL: URL?
-        let assetSize: Int64
-    }
-
     private enum FetchResult {
-        case success(Latest)
+        case success(Release)
         case failure(String)
     }
 
@@ -118,7 +160,7 @@ final class UpdateChecker: ObservableObject {
             let (data, response) = try await URLSession.shared.data(for: request)
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             // 一个 release 都还没发时返回 404，不算错
-            if code == 404 { return .success(Latest(version: "0.0.0", assetURL: nil, assetSize: 0)) }
+            if code == 404 { return .success(Release(version: "0.0.0", notes: "", assetURL: nil, assetSize: 0)) }
             guard code == 200 else { return .failure("GitHub 返回 \(code)") }
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let tag = json["tag_name"] as? String else { return .failure("发布信息读不出来") }
@@ -134,9 +176,10 @@ final class UpdateChecker: ObservableObject {
                 let name = $0["name"] as? String ?? ""
                 return name.contains(arch) && name.hasSuffix(".dmg")
             }
-            return .success(Latest(version: version,
-                                   assetURL: (asset?["browser_download_url"] as? String).flatMap(URL.init(string:)),
-                                   assetSize: (asset?["size"] as? NSNumber)?.int64Value ?? 0))
+            return .success(Release(version: version,
+                                    notes: (json["body"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
+                                    assetURL: (asset?["browser_download_url"] as? String).flatMap(URL.init(string:)),
+                                    assetSize: (asset?["size"] as? NSNumber)?.int64Value ?? 0))
         } catch {
             return .failure(error.localizedDescription)
         }
@@ -155,18 +198,22 @@ final class UpdateChecker: ObservableObject {
 
     // MARK: 下载
 
-    private func startDownload(_ latest: Latest) {
-        guard let url = latest.assetURL, !isDownloading else { return }
+    /// 更新窗口里的「立即更新」
+    func installNow() {
+        guard let release = availableRelease, release.assetURL != nil, !isDownloading else { return }
+        installError = nil
+        startDownload(release)
+    }
+
+    private func startDownload(_ release: Release) {
+        guard let url = release.assetURL else { return }
         isDownloading = true
         downloadProgress = 0
         downloadCancelled = false
-        pendingVersion = latest.version
-        showProgressWindow()
-
         let delegate = DownloadDelegate(
-            expectedSize: latest.assetSize,
+            expectedSize: release.assetSize,
             onProgress: { [weak self] p in Task { @MainActor in self?.downloadProgress = p } },
-            onFinish: { [weak self] r in Task { @MainActor in self?.downloadFinished(r, version: latest.version) } }
+            onFinish: { [weak self] r in Task { @MainActor in self?.downloadFinished(r, version: release.version) } }
         )
         let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
         downloadSession = session
@@ -180,7 +227,6 @@ final class UpdateChecker: ObservableObject {
         downloadTask = nil
         isDownloading = false
         downloadProgress = 0
-        closeProgressWindow()
     }
 
     private func downloadFinished(_ result: DownloadResult, version: String) {
@@ -189,15 +235,18 @@ final class UpdateChecker: ObservableObject {
         // URLSession 强引用着 delegate，不 invalidate 两个都不会释放
         downloadSession?.finishTasksAndInvalidate()
         downloadSession = nil
-        closeProgressWindow()
         switch result {
         case .success(let file):
             install(from: file, version: version)
         case .failure(let message):
             guard !downloadCancelled else { return }
-            log("下载更新失败：\(message)")
-            presentInstallFailure(message)
+            fail("下载失败：\(message)")
         }
+    }
+
+    private func fail(_ message: String) {
+        log("更新失败：\(message)")
+        installError = message
     }
 
     // MARK: 安装
@@ -213,18 +262,18 @@ final class UpdateChecker: ObservableObject {
         // 脚本要在 App 里换掉 Contents：没写权限的话退出了才发现换不了，先在这儿拦下
         guard FileManager.default.isWritableFile(atPath: destApp),
               FileManager.default.isWritableFile(atPath: destApp + "/Contents") else {
-            presentInstallFailure("没有权限替换 \(destApp)")
+            fail("没有权限替换 \(destApp)")
             return
         }
         guard let mountPoint = Self.mountDMG(dmg.path) else {
-            presentInstallFailure("更新包打不开")
+            fail("更新包打不开")
             return
         }
         let sourceApp = mountPoint + "/NetTick.app"
         if let problem = Self.checkPackage(sourceApp, version: version) {
             Self.detachDMG(mountPoint)
             log("更新包没通过核对：\(problem)")
-            presentInstallFailure(problem)
+            fail(problem)
             return
         }
 
@@ -238,10 +287,17 @@ final class UpdateChecker: ObservableObject {
                            Self.updateLogPath, dmg.path]
             try p.run()
             log("更新脚本已启动，退出后替换为 \(version)")
-            NSApp.terminate(nil)
+            // 窗口上挂着更新窗口（sheet）时 NSApp.terminate 不生效，AppKit 直接拒绝退出（2026-11-25 实测：
+            // 脚本等满 30 秒放弃）。先收起更新窗口再退；万一还没退，走 SIGTERM（同样先写库再退出）
+            showDialog = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { NSApp.terminate(nil) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                log("退出没生效，改发 SIGTERM")
+                kill(getpid(), SIGTERM)
+            }
         } catch {
             Self.detachDMG(mountPoint)
-            presentInstallFailure(error.localizedDescription)
+            fail(error.localizedDescription)
         }
     }
 
@@ -311,120 +367,138 @@ final class UpdateChecker: ObservableObject {
     private static func mountDMG(_ path: String) -> String? { DiskImage.attach(path) }
 
     private static func detachDMG(_ mountPoint: String) { DiskImage.detach(mountPoint) }
+}
 
-    // MARK: 进度窗口
+// MARK: - 更新窗口
 
-    private func showProgressWindow() {
-        if progressWindow == nil {
-            let host = NSHostingController(rootView: DownloadProgressView(updates: self))
-            let w = NSWindow(contentViewController: host)
-            w.styleMask = [.titled]   // 不给关闭按钮，取消走窗口里的按钮
-            w.title = "软件更新"
-            w.isReleasedWhenClosed = false
-            // 先布局定尺寸再居中，反过来会按近零尺寸居中（PasteMemo #66）
-            host.view.layoutSubtreeIfNeeded()
-            w.setContentSize(host.view.fittingSize)
-            w.center()
-            progressWindow = w
-        }
-        NSApp.activate(ignoringOtherApps: true)
-        progressWindow?.makeKeyAndOrderFront(nil)
-    }
+/// 关于页上弹出的更新窗口：版本、更新内容、立即更新。下载进度和失败原因都在这里；装好后 App 自己退出重开
+struct UpdateDialog: View {
+    @ObservedObject var updates: UpdateChecker
 
-    private func closeProgressWindow() {
-        progressWindow?.orderOut(nil)
-        progressWindow = nil
-    }
-
-    // MARK: 弹窗
-
-    /// 弹窗不能在主队列的 block / MainActor 任务里直接 runModal：主队列不可重入，弹窗开着的时候主线程上别的派发全排着，
-    /// 菜单栏速率停住、SIGTERM 写库退不了（2026-11-25 实测：每天自动检查弹出来没人点，就一直这样）。
-    /// 交给 RunLoop 执行就不占着主队列；只排在 default 模式，前一个弹窗开着时后一个等它关了再出来
-    private func runAlert(_ alert: NSAlert, then handle: @escaping @MainActor (NSApplication.ModalResponse) -> Void = { _ in }) {
-        RunLoop.main.perform(inModes: [.default]) {
-            MainActor.assumeIsolated {
-                NSApp.activate(ignoringOtherApps: true)
-                handle(alert.runModal())
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if let r = updates.availableRelease {
+                header(r)
+                notes(r)
+                footer(r)
             }
         }
-        CFRunLoopWakeUp(CFRunLoopGetMain())
+        .padding(20)
+        .frame(width: 460)
+        .interactiveDismissDisabled(updates.isDownloading)
     }
 
-    private func presentAvailable(_ latest: Latest) {
-        let alert = NSAlert()
-        alert.messageText = "有新版本 \(latest.version)"
-        if latest.assetURL != nil {
-            alert.informativeText = "当前版本 \(currentVersion)，装完自动重启。"
-            alert.addButton(withTitle: "下载并安装")
-            alert.addButton(withTitle: "稍后")
-            alert.addButton(withTitle: "跳过这一版")
-            runAlert(alert) { [weak self] r in
-                switch r {
-                case .alertFirstButtonReturn: self?.startDownload(latest)
-                case .alertThirdButtonReturn: UserDefaults.standard.set(latest.version, forKey: Self.skippedKey)
-                default: break
+    private func header(_ r: UpdateChecker.Release) -> some View {
+        HStack(spacing: 12) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable().interpolation(.high)
+                .frame(width: 52, height: 52)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("NetTick \(r.version)").font(.system(size: 17, weight: .semibold))
+                Text("当前版本 \(updates.currentVersion)，更新完自动重启。")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func notes(_ r: UpdateChecker.Release) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("更新内容").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 5) {
+                    if r.notes.isEmpty {
+                        Text("这一版没写更新说明。").foregroundStyle(.secondary)
+                    }
+                    ForEach(Array(Self.noteLines(r.notes).enumerated()), id: \.offset) { _, line in
+                        switch line {
+                        case .blank:
+                            Spacer().frame(height: 3)
+                        case .bullet(let text):
+                            // 圆点单独一列：折行时第二行和文字对齐，不顶到最左边
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Text("•").foregroundStyle(.secondary)
+                                Text(text)
+                            }
+                        case .heading(let text):
+                            Text(text).fontWeight(.semibold)
+                        case .text(let text):
+                            Text(text)
+                        }
+                    }
+                }
+                .font(.system(size: 13))
+                .lineSpacing(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .padding(12)
+            }
+            .frame(height: 190)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Theme.tile))
+        }
+    }
+
+    @ViewBuilder private func footer(_ r: UpdateChecker.Release) -> some View {
+        if updates.isDownloading {
+            VStack(alignment: .leading, spacing: 8) {
+                ProgressView(value: updates.downloadProgress)
+                HStack {
+                    Text("正在下载 \(Int(updates.downloadProgress * 100))%")
+                        .font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit()
+                    Spacer()
+                    Button("取消") { updates.cancelDownload() }
                 }
             }
         } else {
-            alert.informativeText = "当前版本 \(currentVersion)。这一版没有适合这台 Mac 的安装包，去发布页手动下载。"
-            alert.addButton(withTitle: "打开发布页")
-            alert.addButton(withTitle: "稍后")
-            runAlert(alert) { r in
-                if r == .alertFirstButtonReturn { NSWorkspace.shared.open(Self.releasesPage) }
+            VStack(alignment: .leading, spacing: 10) {
+                if let error = updates.installError {
+                    Text(error).font(.system(size: 12)).foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if r.assetURL == nil {
+                    Text("这一版没有适合这台 Mac 的安装包，去发布页手动下载。")
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+                HStack {
+                    if updates.installError != nil || r.assetURL == nil {
+                        Button("打开发布页") { NSWorkspace.shared.open(UpdateChecker.releasesPage) }
+                    }
+                    Spacer()
+                    Button("稍后") { updates.showDialog = false }
+                        .keyboardShortcut(.cancelAction)
+                    if r.assetURL != nil {
+                        Button(updates.installError == nil ? "立即更新" : "重试") { updates.installNow() }
+                            .keyboardShortcut(.defaultAction)
+                    }
+                }
             }
         }
     }
 
-    private func presentUpToDate() {
-        let alert = NSAlert()
-        alert.messageText = "已是最新版本"
-        alert.informativeText = "当前版本 \(currentVersion)。"
-        alert.addButton(withTitle: "好")
-        runAlert(alert)
+    enum NoteLine {
+        case blank, bullet(AttributedString), heading(AttributedString), text(AttributedString)
     }
 
-    private func presentFailure(_ message: String) {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "检查更新失败"
-        alert.informativeText = message
-        alert.addButton(withTitle: "好")
-        runAlert(alert)
-    }
-
-    private func presentInstallFailure(_ message: String) {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "自动更新失败"
-        let end = message.last.map { "。.!！".contains($0) } ?? true
-        alert.informativeText = message + (end ? "" : "。") + "\n\n可以去发布页手动下载。"
-        alert.addButton(withTitle: "打开发布页")
-        alert.addButton(withTitle: "稍后")
-        runAlert(alert) { r in
-            if r == .alertFirstButtonReturn { NSWorkspace.shared.open(Self.releasesPage) }
+    /// Release 说明是 Markdown：按行拆成列表项、标题、普通段落；行内的粗体、链接、代码照常显示
+    static func noteLines(_ markdown: String) -> [NoteLine] {
+        func inline(_ s: String) -> AttributedString {
+            let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+            return (try? AttributedString(markdown: s, options: options)) ?? AttributedString(s)
         }
-    }
-}
-
-// MARK: - 下载进度
-
-private struct DownloadProgressView: View {
-    @ObservedObject var updates: UpdateChecker
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("正在下载 NetTick \(updates.pendingVersion)…")
-                .font(.system(size: 13, weight: .medium))
-            ProgressView(value: updates.downloadProgress).frame(width: 280)
-            HStack {
-                Text("\(Int(updates.downloadProgress * 100))%")
-                    .font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()
-                Spacer()
-                Button("取消") { updates.cancelDownload() }
-            }
-            .frame(width: 280)
+        var lines = markdown.components(separatedBy: "\n").map { line -> NoteLine in
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if t.isEmpty { return .blank }
+            if t.hasPrefix("- ") || t.hasPrefix("* ") { return .bullet(inline(String(t.dropFirst(2)))) }
+            if t.hasPrefix("#") { return .heading(inline(String(t.drop(while: { $0 == "#" })).trimmingCharacters(in: .whitespaces))) }
+            return .text(inline(t))
         }
-        .padding(20)
+        // 连着的空行只留一个，首尾的空行去掉
+        lines = lines.enumerated().filter { i, l in
+            if case .blank = l, i > 0, case .blank = lines[i - 1] { return false }
+            return true
+        }.map(\.element)
+        while let f = lines.first, case .blank = f { lines.removeFirst() }
+        while let l = lines.last, case .blank = l { lines.removeLast() }
+        return lines
     }
 }
 

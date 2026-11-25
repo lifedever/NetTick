@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UserNotifications
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -9,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let liveModel = LiveModel()
     private(set) var recorder: Recorder!
     private var mainWindow: MainWindowController?
+    private let notificationRouter = NotificationRouter()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         log("NetTick 启动 —— 二进制编译于 \(binaryBuildTime())")
@@ -49,6 +51,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // 合盖前写一次库，睡着时被强退也丢不了多少
             MainActor.assumeIsolated { self?.flushSoon() }
         }
+        // 点更新通知打开「关于」页；要在发任何通知之前设好
+        notificationRouter.onOpenUpdate = { [weak self] in self?.openMain(.about) }
+        UNUserNotificationCenter.current().delegate = notificationRouter
         NewAppNotifier.shared.prepare()
         UpdateChecker.shared.startPeriodicChecks()
         handleSigterm()
@@ -96,7 +101,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 菜单栏挤满时图标会被藏到刘海后面：再次打开 NetTick（聚焦搜索、启动台、双击）就直接开主窗口
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        openMain(.rank)
+        // 主窗口已经开着就只拿到前面、不换页。点通知时系统也会发「再次打开」，而且晚于通知的点击回调：
+        // 不这样的话，点更新通知刚打开的「关于」页马上被切回排行页（2026-11-25 实测）
+        if let w = mainWindow, w.isVisible {
+            log("再次打开：主窗口开着，只拿到前面")
+            w.bringToFront()
+        } else {
+            log("再次打开：打开排行页")
+            openMain(.rank)
+        }
         return false
     }
 
@@ -123,7 +136,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func showSettings(_ sender: Any?) { openMain(.general) }
     @objc func showAbout(_ sender: Any?) { openMain(.about) }
-    @objc func checkForUpdates(_ sender: Any?) { UpdateChecker.shared.check(userInitiated: true) }
+    /// 结果显示在关于页：有新版本弹更新窗口，没有就在页上写状态
+    @objc func checkForUpdates(_ sender: Any?) {
+        openMain(.about)
+        UpdateChecker.shared.check(userInitiated: true)
+    }
     @objc func openSponsor(_ sender: Any?) { NSWorkspace.shared.open(AppLinks.sponsor) }
 
     func openMain(_ page: MainPage) {
@@ -143,5 +160,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
         exit(1)
+    }
+}
+
+/// 点系统通知：更新通知打开「关于」页（那里点「更新到 x.y.z」才弹更新窗口）；新程序联网通知只把 App 叫到前面
+final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
+    var onOpenUpdate: (() -> Void)?
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        let id = response.notification.request.identifier
+        DispatchQueue.main.async {
+            log("点了通知：\(id)")
+            if id.hasPrefix(UpdateChecker.notificationPrefix) { self.onOpenUpdate?() }
+        }
+        completionHandler()
+    }
+
+    /// 主窗口开着时 App 在前台，系统默认不显示通知，要显式放行
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .list])
     }
 }
