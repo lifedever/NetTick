@@ -25,7 +25,8 @@ if [ -n "$PREV" ]; then
         || fail "$VERSION 不比上一版 ${PREV} 新"
 fi
 # ad-hoc 签的包对不上已装版本的签名，App 里的更新会拒装；通知、登录项也会把它当成另一个 App
-security find-identity -p codesigning 2>/dev/null | grep -q "$CERT" || fail "本机没有证书「${CERT}」（scripts/setup-dev-cert.sh）"
+IDENTITIES="$(security find-identity -p codesigning 2>/dev/null || true)"
+grep -q "$CERT" <<< "$IDENTITIES" || fail "本机没有证书「${CERT}」（scripts/setup-dev-cert.sh）"
 [ -z "$NOTES_FILE" ] || [ -f "$NOTES_FILE" ] || fail "找不到更新说明文件 $NOTES_FILE"
 
 NETTICK_VERSION="$VERSION" ./scripts/build-app.sh --dmg
@@ -35,8 +36,11 @@ DMG="$PWD/build/NetTick-$VERSION-$(uname -m).dmg"
 echo "▸ 验包…"
 [ -f "$DMG" ] || fail "没有 $DMG"
 [ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Contents/Info.plist")" = "$VERSION" ] || fail "包里的版本号不是 $VERSION"
-codesign -dvv "$APP" 2>&1 | grep -q "Authority=$CERT" || fail "包不是用「${CERT}」签的"
-MNT="$(hdiutil attach "$DMG" -nobrowse -noverify | grep -o '/Volumes/.*' | head -1)"
+# 先存下来再 grep：管道里 grep -q 一匹配就退出，codesign 收到 SIGPIPE，pipefail 下整条判失败（0.2.0 发版时踩过）
+SIGNINFO="$(codesign -dvv "$APP" 2>&1)"
+grep -q "Authority=$CERT" <<< "$SIGNINFO" || fail "包不是用「${CERT}」签的"
+ATTACH="$(hdiutil attach "$DMG" -nobrowse -noverify)"
+MNT="$(grep -m1 -o '/Volumes/.*' <<< "$ATTACH")"
 OK=1
 [ -d "$MNT/NetTick.app" ] || OK=0
 [ -e "$MNT/NetTick.app/Contents/NetTick.app" ] && OK=0   # 嵌套 .app（cp -R 拷进已存在目录）
