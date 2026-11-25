@@ -39,13 +39,14 @@ echo "▸ 验包…"
 # 先存下来再 grep：管道里 grep -q 一匹配就退出，codesign 收到 SIGPIPE，pipefail 下整条判失败（0.2.0 发版时踩过）
 SIGNINFO="$(codesign -dvv "$APP" 2>&1)"
 grep -q "Authority=$CERT" <<< "$SIGNINFO" || fail "包不是用「${CERT}」签的"
-ATTACH="$(hdiutil attach "$DMG" -nobrowse -noverify)"
+# 先用 diskutil，老系统退回 hdiutil（macOS 27 上 hdiutil attach -nobrowse / detach 已弃用）
+ATTACH="$(diskutil image attach --nobrowse --readOnly "$DMG" 2>/dev/null || hdiutil attach "$DMG" -nobrowse -noverify 2>/dev/null)"
 MNT="$(grep -m1 -o '/Volumes/.*' <<< "$ATTACH")"
 OK=1
 [ -d "$MNT/NetTick.app" ] || OK=0
 [ -e "$MNT/NetTick.app/Contents/NetTick.app" ] && OK=0   # 嵌套 .app（cp -R 拷进已存在目录）
 codesign --verify --strict "$MNT/NetTick.app" 2>/dev/null || OK=0
-hdiutil detach "$MNT" -quiet
+diskutil eject "$MNT" >/dev/null 2>&1 || hdiutil detach "$MNT" -quiet
 [ "$OK" = 1 ] || fail "DMG 里的 NetTick.app 不对"
 echo "  ${VERSION}，$(uname -m)，签名 ${CERT}，DMG 正常"
 

@@ -254,12 +254,14 @@ final class UpdateChecker: ObservableObject {
     #!/bin/bash
     PID="$1"; SRC="$2"; DEST="$3"; MOUNT="$4"; LOG="$5"; DMG="$6"
     exec >>"$LOG" 2>&1
+    # 先用 diskutil，老系统退回 hdiutil（macOS 27 上 hdiutil detach 已弃用，见 DiskImage）
+    unmount_dmg() { diskutil eject "$MOUNT" >/dev/null 2>&1 || hdiutil detach "$MOUNT" -quiet 2>/dev/null; }
     echo "$(date '+%F %T') 更新开始：$SRC → $DEST"
     # 等旧进程退出（它要先写库），最多 30 秒；还没退就放弃，不替换正在运行的包
     for _ in $(seq 1 150); do kill -0 "$PID" 2>/dev/null || break; sleep 0.2; done
     if kill -0 "$PID" 2>/dev/null; then
         echo "旧进程 $PID 30 秒没退出，放弃更新"
-        hdiutil detach "$MOUNT" -quiet; rm -f "$0"; exit 1
+        unmount_dmg; rm -f "$0"; exit 1
     fi
     rm -rf "$DEST/Contents.new" "$DEST/Contents.old"
     if ditto "$SRC/Contents" "$DEST/Contents.new"; then
@@ -270,7 +272,7 @@ final class UpdateChecker: ObservableObject {
     else
         echo "拷贝新版失败，旧版不动"; rm -rf "$DEST/Contents.new"
     fi
-    hdiutil detach "$MOUNT" -quiet
+    unmount_dmg
     rm -f "$DMG"
     xattr -dr com.apple.quarantine "$DEST" 2>/dev/null
     echo "$(date '+%F %T') 重新打开"
@@ -306,29 +308,9 @@ final class UpdateChecker: ObservableObject {
         return SecStaticCodeCheckValidity(other, SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSStrictValidate), req) == errSecSuccess
     }
 
-    private static func mountDMG(_ path: String) -> String? {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
-        p.arguments = ["attach", path, "-nobrowse", "-noverify"]
-        let pipe = Pipe()
-        p.standardOutput = pipe
-        p.standardError = FileHandle.nullDevice
-        do { try p.run() } catch { return nil }
-        let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        p.waitUntilExit()
-        guard p.terminationStatus == 0,
-              let line = out.components(separatedBy: "\n").first(where: { $0.contains("/Volumes/") }),
-              let r = line.range(of: "/Volumes/") else { return nil }
-        return String(line[r.lowerBound...]).trimmingCharacters(in: .whitespaces)
-    }
+    private static func mountDMG(_ path: String) -> String? { DiskImage.attach(path) }
 
-    private static func detachDMG(_ mountPoint: String) {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
-        p.arguments = ["detach", mountPoint, "-quiet"]
-        try? p.run()
-        p.waitUntilExit()
-    }
+    private static func detachDMG(_ mountPoint: String) { DiskImage.detach(mountPoint) }
 
     // MARK: 进度窗口
 
