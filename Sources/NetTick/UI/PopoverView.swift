@@ -12,8 +12,13 @@ final class LiveModel: ObservableObject {
         didSet { UserDefaults.standard.set(pinned, forKey: "popoverPinned") }
     }
 
+    /// 「正在用网」的固定 3 行。关着时也跟着更新，打开那一刻就是最新的；
+    /// 不用 @Published：开着时每秒 `live = l` 已经会触发重绘，关着时不该触发
+    private(set) var slots = ActiveSlots()
+
     func receive(_ l: Collector.Live) {
         latest = l
+        slots.update(l.active, now: Date())
         if isVisible { live = l }
     }
 
@@ -75,33 +80,36 @@ struct PopoverView: View {
 
     // MARK: 正在用网
 
+    /// 固定 3 行（见 ActiveSlots）：空着、灰着都占位，面板高度不跟着 App 多少跳
     private var activeSection: some View {
-        let rows = live.active.filter { $0.rx + $0.tx >= 1000 }.prefix(3)
-        return VStack(alignment: .leading, spacing: 2) {
+        let slots = model.slots
+        let rows = slots.ordered
+        let rowHeight: CGFloat = 28, rowSpacing: CGFloat = 2
+        let listHeight = CGFloat(ActiveSlots.count) * rowHeight + CGFloat(ActiveSlots.count - 1) * rowSpacing
+        return VStack(alignment: .leading, spacing: rowSpacing) {
             SectionLabel(title: "正在用网")
-            if !live.available {
-                Text("按 App 统计用不了：系统组件加载失败，只能看总速率。")
-                    .font(.system(size: 12)).foregroundStyle(.secondary)
-                    .frame(height: 28)
-            } else if rows.isEmpty {
-                Text("没有 App 在用网")
-                    .font(.system(size: 12)).foregroundStyle(.secondary)
-                    .frame(height: 28)
-            } else {
-                ForEach(Array(rows), id: \.identity.key) { r in
-                    let upMain = r.tx > r.rx
-                    HStack(spacing: 8) {
-                        AppIconView(identity: r.identity)
-                        Text(r.identity.name).lineLimit(1)
-                        Spacer(minLength: 8)
-                        Text(upMain ? "↑ \(Fmt.rate(r.tx))" : "↓ \(Fmt.rate(r.rx))").monospacedDigit()
-                        Text(upMain ? "↓ \(Fmt.rate(r.rx))" : "↑ \(Fmt.rate(r.tx))").monospacedDigit()
-                            .foregroundStyle(.secondary)
+            Group {
+                if !live.available {
+                    Text("按 App 统计用不了：系统组件加载失败，只能看总速率。")
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                        .frame(height: rowHeight)
+                } else if slots.isEmpty {
+                    Text("没有 App 在用网")
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                        .frame(height: rowHeight)
+                } else {
+                    VStack(spacing: rowSpacing) {
+                        ForEach(0..<ActiveSlots.count, id: \.self) { i in
+                            if let s = rows[i] {
+                                ActiveRow(slot: s).frame(height: rowHeight)
+                            } else {
+                                Color.clear.frame(height: rowHeight)
+                            }
+                        }
                     }
-                    .font(.system(size: 13))
-                    .frame(height: 28)
                 }
             }
+            .frame(maxWidth: .infinity, minHeight: listHeight, maxHeight: listHeight, alignment: .topLeading)
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
     }
@@ -157,6 +165,26 @@ struct PopoverView: View {
             Button("退出", action: onQuit).buttonStyle(.borderless).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
+    }
+}
+
+/// 「正在用网」的一行。停了的变灰，速率照实显示
+private struct ActiveRow: View {
+    var slot: ActiveSlots.Slot
+    var body: some View {
+        let upMain = slot.tx > slot.rx
+        HStack(spacing: 8) {
+            AppIconView(identity: slot.identity)
+                .opacity(slot.isActive ? 1 : 0.4)
+            Text(slot.identity.name).lineLimit(1)
+                .foregroundStyle(slot.isActive ? HierarchicalShapeStyle.primary : .secondary)
+            Spacer(minLength: 8)
+            Text(upMain ? "↑ \(Fmt.rate(slot.tx))" : "↓ \(Fmt.rate(slot.rx))").monospacedDigit()
+                .foregroundStyle(slot.isActive ? HierarchicalShapeStyle.primary : .tertiary)
+            Text(upMain ? "↓ \(Fmt.rate(slot.rx))" : "↑ \(Fmt.rate(slot.tx))").monospacedDigit()
+                .foregroundStyle(slot.isActive ? HierarchicalShapeStyle.secondary : .tertiary)
+        }
+        .font(.system(size: 13))
     }
 }
 
