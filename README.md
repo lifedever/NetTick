@@ -15,6 +15,10 @@
   <a href="#安装">🚀 <strong>安装</strong></a> ｜ <a href="https://www.lifedever.com">💖 <strong>赞助</strong></a>
 </p>
 
+<p align="center">
+  <img src="docs/screenshot-rank.png" width="820" alt="NetTick 流量排行">
+</p>
+
 ---
 
 ## 菜单栏和面板
