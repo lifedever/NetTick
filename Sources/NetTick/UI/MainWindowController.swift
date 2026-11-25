@@ -2,14 +2,24 @@ import AppKit
 import SwiftUI
 
 enum MainPage: String, CaseIterable, Identifiable {
-    case rank, curve, month, settings
+    case rank, curve, month
+    // 设置拆成五页放侧栏（2026-11-25 用户要求，别一长页往下拉）
+    case general, menuBar = "menubar", notifications = "notify", data, about
+
+    static let statsPages: [MainPage] = [.rank, .curve, .month]
+    static let settingsPages: [MainPage] = [.general, .menuBar, .notifications, .data, .about]
+
     var id: String { rawValue }
     var title: String {
         switch self {
         case .rank: return "流量排行"
         case .curve: return "速率曲线"
         case .month: return "月报"
-        case .settings: return "设置"
+        case .general: return "通用"
+        case .menuBar: return "菜单栏"
+        case .notifications: return "通知"
+        case .data: return "数据"
+        case .about: return "关于"
         }
     }
     var symbol: String {
@@ -17,8 +27,17 @@ enum MainPage: String, CaseIterable, Identifiable {
         case .rank: return "list.bullet"
         case .curve: return "chart.xyaxis.line"
         case .month: return "calendar"
-        case .settings: return "gearshape"
+        case .general: return "gearshape"
+        case .menuBar: return "menubar.rectangle"
+        case .notifications: return "bell.badge"
+        case .data: return "externaldrive"
+        case .about: return "info.circle"
         }
+    }
+
+    /// 开发参数 `--debug-open` 里的名字；`settings` 指通用页
+    init?(arg: String) {
+        if arg == "settings" { self = .general } else { self.init(rawValue: arg) }
     }
 }
 
@@ -35,7 +54,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     private let nav = MainNav()
 
     init(recorder: Recorder, collector: Collector) {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1160, height: 700),
+        window = NSWindow(contentRect: NSRect(origin: .zero, size: MainView.defaultSize),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                           backing: .buffered, defer: false)
         super.init()
@@ -51,7 +70,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         // 让 SwiftUI 的 .toolbar / .navigationTitle 落到这个 NSWindow 的原生工具栏上（macOS 14+）
         host.sceneBridgingOptions = [.toolbars, .title]
         window.contentViewController = host
-        window.setContentSize(NSSize(width: 1160, height: 700))
+        window.setContentSize(MainView.defaultSize)
         window.center()
         window.setFrameAutosaveName("NetTickMain")
         // 存下来的旧尺寸可能比现在的最小尺寸还小（老版本没拦住）：撑到最小尺寸
@@ -70,6 +89,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         guard let i = args.firstIndex(of: "--debug-size"), i + 1 < args.count else { return }
         let parts = args[i + 1].split(separator: "x").compactMap { Double($0) }
         guard parts.count == 2 else { return }
+        // 调试尺寸别存进「上次的大小」：不然截一轮图，用户下次打开就是这个尺寸（2026-11-25 踩过）
+        window.setFrameAutosaveName("")
         window.setContentSize(NSSize(width: parts[0], height: parts[1]))
         log("调试尺寸：请求 \(args[i + 1])，实际内容区 \(NSStringFromSize(window.contentLayoutRect.size))")
     }

@@ -32,7 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let popover = PopoverView(model: liveModel,
                                   onOpenMain: { [weak self] in self?.openMain(.rank) },
-                                  onOpenSettings: { [weak self] in self?.openMain(.settings) },
+                                  onOpenSettings: { [weak self] in self?.openMain(.general) },
                                   onQuit: { NSApp.terminate(nil) },
                                   onHeight: { [weak self] h in self?.statusItem?.setPopoverHeight(h) })
         statusItem = StatusItemController(live: liveModel, popoverContent: popover)
@@ -50,18 +50,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { self?.flushSoon() }
         }
         NewAppNotifier.shared.prepare()
+        UpdateChecker.shared.startPeriodicChecks()
         handleSigterm()
         debugOpen()
     }
 
-    /// 开发用：`--debug-open rank|curve|month|settings|popover` 直接打开对应界面截图核对
+    /// 开发用：`--debug-open rank|curve|month|general|menubar|notify|data|about|popover` 直接打开对应界面截图核对（settings = general）
     /// （菜单栏挤满时图标会被藏到刘海后面，点不到）
     private var debugWindow: NSWindow?
     private func debugOpen() {
         let args = CommandLine.arguments
+        if args.contains("--debug-dark") { NSApp.appearance = NSAppearance(named: .darkAqua) }
+        if let i = args.firstIndex(of: "--debug-update"), i + 2 < args.count {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                UpdateChecker.shared.debugInstall(dmg: args[i + 1], version: args[i + 2])
+            }
+        }
         guard let i = args.firstIndex(of: "--debug-open"), i + 1 < args.count else { return }
         let what = args[i + 1]
-        if let page = MainPage(rawValue: what) {
+        if let page = MainPage(arg: what) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self.openMain(page) }
         } else if what == "popover" {
             liveModel.reveal()
@@ -111,6 +118,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         collector?.shutdown()
         log("NetTick 退出")
     }
+
+    // MARK: App 菜单
+
+    @objc func showSettings(_ sender: Any?) { openMain(.general) }
+    @objc func showAbout(_ sender: Any?) { openMain(.about) }
+    @objc func checkForUpdates(_ sender: Any?) { UpdateChecker.shared.check(userInitiated: true) }
+    @objc func openSponsor(_ sender: Any?) { NSWorkspace.shared.open(AppLinks.sponsor) }
 
     func openMain(_ page: MainPage) {
         statusItem.closePopover()

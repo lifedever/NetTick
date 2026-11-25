@@ -143,7 +143,7 @@ struct RankView: View {
                 table
                 if let sel = model.rows.first(where: { $0.id == model.selected }) {
                     AppDetail(app: sel, period: model.period, detail: model.detail?.key == sel.id ? model.detail : nil)
-                        .frame(width: 250)
+                        .frame(width: 220)
                 }
             }
             .frame(maxHeight: .infinity, alignment: .top)
@@ -198,9 +198,9 @@ struct RankView: View {
         return VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Text("App").frame(maxWidth: .infinity, alignment: .leading)
-                header("下载", .rx).frame(width: 80, alignment: .trailing)
-                header("上传", .tx).frame(width: 80, alignment: .trailing)
-                header("合计", .total).frame(width: 170, alignment: .trailing)
+                header("下载", .rx).frame(width: 72, alignment: .trailing)
+                header("上传", .tx).frame(width: 72, alignment: .trailing)
+                header("合计", .total).frame(width: 140, alignment: .trailing)
             }
             .font(.system(size: 11.5))
             .foregroundStyle(.secondary)
@@ -250,15 +250,15 @@ private struct RankRow: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Text(Fmt.bytes(Double(row.bytes.rx))).monospacedDigit().frame(width: 80, alignment: .trailing)
-            Text(Fmt.bytes(Double(row.bytes.tx))).monospacedDigit().frame(width: 80, alignment: .trailing)
+            Text(Fmt.bytes(Double(row.bytes.rx))).monospacedDigit().frame(width: 72, alignment: .trailing)
+            Text(Fmt.bytes(Double(row.bytes.tx))).monospacedDigit().frame(width: 72, alignment: .trailing)
             HStack(spacing: 8) {
                 SegmentBar(parts: [.init(value: Double(row.bytes.rx), color: Theme.download),
                                    .init(value: Double(row.bytes.tx), color: Theme.upload)],
                            maxValue: maxTotal, height: 5)
                 Text(Fmt.bytes(Double(row.bytes.total))).monospacedDigit().frame(width: 62, alignment: .trailing)
             }
-            .frame(width: 170)
+            .frame(width: 140)
         }
         .padding(.horizontal, 10)
         .frame(height: 42)

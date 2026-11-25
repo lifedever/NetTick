@@ -1,15 +1,17 @@
 #!/bin/bash
-# 构建 NetTick.app（只出本机架构，自用不打 DMG）。
+# 构建 NetTick.app（只出本机架构）。
 #
-#   ./scripts/build-app.sh             # 版本号取最近的 git tag，没有就 0.1.0
+#   ./scripts/build-app.sh             # 版本号取最近的 git tag，没有就 0.1.0；NETTICK_VERSION=x.y.z 可指定
 #   ./scripts/build-app.sh --install   # 构建后替换 /Applications/NetTick.app 并启动
+#   ./scripts/build-app.sh --dmg       # 另打 DMG（发版用，见 scripts/release.sh）
 #
-# 产物：build/NetTick.app
+# 产物：build/NetTick.app，加 --dmg 时还有 build/NetTick-<版本>-<架构>.dmg
+# （DMG 的名字是和 App 里自动更新的约定：按名字里的架构找包，改名 = 已装的版本找不到更新）
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 
-VERSION="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
+VERSION="${NETTICK_VERSION:-$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)}"
 VERSION="${VERSION:-0.1.0}"
 BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
 ARCH="$(uname -m)"
@@ -56,6 +58,19 @@ shopt -u nullglob
 
 codesign --force --deep --sign "$SIGN_ID" "$APP"
 codesign --verify --strict "$APP" && echo "  签名校验通过（${SIGN_ID}）"
+
+if [[ " $* " == *" --dmg "* ]]; then
+    echo "▸ 打包 DMG…"
+    DMG="$ROOT/build/NetTick-$VERSION-$ARCH.dmg"
+    STAGE="$ROOT/build/dmg-stage"
+    rm -rf "$STAGE"
+    mkdir -p "$STAGE"
+    ditto "$APP" "$STAGE/NetTick.app"
+    ln -s /Applications "$STAGE/Applications"
+    hdiutil create -volname "NetTick $VERSION" -srcfolder "$STAGE" -ov -format UDZO -quiet "$DMG"
+    rm -rf "$STAGE"
+    echo "  ${DMG}（$(du -h "$DMG" | cut -f1)）"
+fi
 
 if [[ " $* " == *" --install "* ]]; then
     echo "▸ 安装到 /Applications…"
