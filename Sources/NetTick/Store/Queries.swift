@@ -178,4 +178,25 @@ extension Database {
         prepare("SELECT value FROM meta WHERE key = ?")?.bind(key).rows { v = $0.string(0) }
         return v
     }
+
+    func setMetaValue(_ key: String, _ value: String) {
+        prepare("INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")?
+            .bind(key, value).run()
+    }
+
+    /// 这次开机里清除过统计时，清除那一刻网卡的计数：「开机以来」从这里算起。没清除过（或是上次开机清的）返回 nil
+    func bootBaseline() -> Bytes? {
+        guard metaValue(MetaKey.resetBoot) == BootSession.id,
+              let rx = metaValue(MetaKey.resetNicRx).flatMap(UInt64.init),
+              let tx = metaValue(MetaKey.resetNicTx).flatMap(UInt64.init) else { return nil }
+        return Bytes(rx: rx, tx: tx)
+    }
+}
+
+enum MetaKey {
+    static let firstLaunch = "first_launch"
+    /// 清除统计时是哪次开机、网卡计数是多少
+    static let resetBoot = "reset_boot"
+    static let resetNicRx = "reset_nic_rx"
+    static let resetNicTx = "reset_nic_tx"
 }

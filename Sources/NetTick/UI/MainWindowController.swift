@@ -62,7 +62,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         window.toolbarStyle = .unified
         window.isReleasedWhenClosed = false
         window.delegate = self
-        let root = MainView(nav: nav, data: MainData(recorder: recorder))
+        let root = MainView(nav: nav, data: MainData(recorder: recorder, collector: collector))
         let host = NSHostingController(rootView: root)
         // 窗口最小尺寸跟着 SwiftUI 声明的最小尺寸走（MainView 的 minWidth / minHeight）。
         // 只设 window.minSize 拦不住：用户照样能缩到比内容窄，内容就左右两边一起溢出

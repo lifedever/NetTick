@@ -5,6 +5,8 @@ struct Bytes: Equatable {
     var tx: UInt64 = 0
     var total: UInt64 { rx &+ tx }
     static func += (l: inout Bytes, r: Bytes) { l.rx &+= r.rx; l.tx &+= r.tx }
+    /// 按方向各自减，不小于 0
+    func minus(_ r: Bytes) -> Bytes { Bytes(rx: rx > r.rx ? rx - r.rx : 0, tx: tx > r.tx ? tx - r.tx : 0) }
 }
 
 /// 把采集到的字节记下来：内存里先累加，每分钟写一次库。
@@ -40,6 +42,8 @@ final class Recorder: @unchecked Sendable {
     /// 这次开机以来各 App、网卡的累计（NetTick 运行期间记到的；没运行那段只有网卡计数知道总量）
     private(set) var bootTotals: [String: Bytes] = [:]
     private(set) var bootIface = Bytes()
+    /// 这次开机里清除过统计时，清除那一刻网卡的计数（「开机以来」从这里算起）；没清除过是 nil
+    private(set) var bootBase: Bytes?
     /// 今天以前各 App 的合计和「其他」（按天算好的）。加上今天的就是「全部」；跨天时把今天并进来
     private var beforeTodayTotals: [String: Bytes] = [:]
     private var beforeTodayOther = Bytes()
@@ -89,18 +93,18 @@ final class Recorder: @unchecked Sendable {
             beforeTodayTotals[r.string(0) ?? ""] = Bytes(rx: UInt64(r.int(1)), tx: UInt64(r.int(2)))
         }
         beforeTodayOther = db.otherBytes(from: "0000-01-01", to: Day.offset(today, -1))
-        if let v = meta("first_launch"), let d = Double(v) {
+        if let v = db.metaValue(MetaKey.firstLaunch), let d = Double(v) {
             firstLaunch = d
         } else {
-            setMeta("first_launch", String(now))
+            db.setMetaValue(MetaKey.firstLaunch, String(now))
             firstLaunch = now
         }
         // 刚装好的头两小时：见到的 App 都是「第一次」，不通知，只记下来
-        if let v = meta("learn_until"), let d = Double(v) {
+        if let v = db.metaValue("learn_until"), let d = Double(v) {
             learnUntil = d
         } else {
             learnUntil = now + 2 * 3600
-            setMeta("learn_until", String(learnUntil))
+            db.setMetaValue("learn_until", String(learnUntil))
         }
         log("库已打开：认识 \(knownKeys.count) 个 App，今天已有 \(todayTotals.count) 个")
     }
@@ -109,6 +113,7 @@ final class Recorder: @unchecked Sendable {
     /// 分钟数据只留 3 天，再早的补不回来，归到「NetTick 没运行时」
     private func loadBoot() {
         let boot = BootSession.id
+        bootBase = db.bootBaseline()
         var known = false
         db.prepare("SELECT rx, tx FROM boot_if WHERE boot = ?")?.bind(boot).rows { r in
             known = true
@@ -156,17 +161,6 @@ final class Recorder: @unchecked Sendable {
         var o = beforeTodayOther
         o += Self.gap(todayIface, todayTotals)
         return o
-    }
-
-    private func meta(_ key: String) -> String? {
-        var v: String?
-        db.prepare("SELECT value FROM meta WHERE key = ?")?.bind(key).rows { v = $0.string(0) }
-        return v
-    }
-
-    private func setMeta(_ key: String, _ value: String) {
-        db.prepare("INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")?
-            .bind(key, value).run()
     }
 
     // MARK: - 采集队列入口
@@ -233,6 +227,46 @@ final class Recorder: @unchecked Sendable {
             today = d
             todayTotals = [:]
             todayIface = Bytes()
+        }
+    }
+
+    // MARK: - 清除
+
+    /// 清除所有流量记录，从现在重新记：今天、开机以来、全部、曲线、月报都从 0 开始。
+    /// 采集队列上调用。nic 是网卡此刻的计数，「开机以来」从它算起（不然清除前的部分会算成「NetTick 没运行时」）。
+    /// completion 在主线程回调，失败时带原因。
+    func reset(nic: Bytes?, completion: @escaping (String?) -> Void) {
+        // 清除前攒下的增量不要了；pendingApps 留着，App 表不清
+        pendingDaily = [:]; pendingProc = [:]; pendingMinuteIf = [:]; pendingDailyIf = [:]; pendingMinuteApp = [:]
+        pendingBootApp = [:]; pendingBootIf = Bytes()
+        let now = Date()
+        today = Day.key(now)
+        todayTotals = [:]; todayIface = Bytes()
+        bootTotals = [:]; bootIface = Bytes()
+        beforeTodayTotals = [:]; beforeTodayOther = Bytes()
+        buckets = []
+        firstLaunch = now.timeIntervalSince1970
+        bootBase = nic
+        let meta: [String: String?] = [
+            MetaKey.firstLaunch: String(firstLaunch),
+            MetaKey.resetBoot: nic == nil ? nil : BootSession.id,
+            MetaKey.resetNicRx: nic.map { String($0.rx) },
+            MetaKey.resetNicTx: nic.map { String($0.tx) },
+        ]
+        // 排在已经交给 dbQueue 的写入后面：清除前的那几笔先写进去再一起删，之后写的都是清除后的
+        dbQueue.async { [db] in
+            var failure: String?
+            do {
+                try db.clearStats(meta: meta)
+                // 这次开机的记录先建好，重启 NetTick 时接着记，不去拿分钟数据补
+                db.prepare("INSERT OR IGNORE INTO boot_if(boot, start, rx, tx) VALUES(?, ?, 0, 0)")?
+                    .bind(BootSession.id, BootSession.bootTime.timeIntervalSince1970).run()
+                log("统计已清除，从 \(now) 重新记；数据库 \(Fmt.bytes(Double(db.fileSize)))")
+            } catch {
+                failure = error.localizedDescription
+                log("清除统计失败：\(error.localizedDescription)")
+            }
+            DispatchQueue.main.async { completion(failure) }
         }
     }
 

@@ -194,6 +194,13 @@ struct PopoverView: View {
         case .today:
             return nil
         case .sinceBoot:
+            // 这次开机里清除过统计的，从清除时算起
+            if let from = live.bootCountedFrom {
+                let d = Date(timeIntervalSince1970: from)
+                let c = Calendar.current.dateComponents([.month, .day, .hour, .minute], from: d)
+                let time = String(format: "%d:%02d", c.hour!, c.minute!)
+                return Calendar.current.isDateInToday(d) ? "从 \(time) 起" : "从 \(c.month!) 月 \(c.day!) 日 \(time) 起"
+            }
             return "已开机 \(Fmt.duration(Date().timeIntervalSince(BootSession.bootTime)))"
         case .all:
             guard live.firstLaunch > 0 else { return nil }

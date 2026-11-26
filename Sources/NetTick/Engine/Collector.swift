@@ -63,6 +63,7 @@ final class Collector: @unchecked Sendable {   // 状态只在 queue 上改
         var sinceBoot: [(AppIdentity, Bytes)] = []  // 开机以来（含「NetTick 没运行时」，加起来等于网卡开机以来的计数）
         var allTime: [(AppIdentity, Bytes)] = []    // 第一次运行以来
         var firstLaunch: Double = 0
+        var bootCountedFrom: Double?           // 这次开机里清除过统计时，「开机以来」从这个时间算起
         var available = true                   // 按 App 统计能不能用（私有框架加载失败时 false）
     }
     private var history: [Bytes] = []
@@ -211,15 +212,16 @@ final class Collector: @unchecked Sendable {   // 状态只在 queue 上改
         live.active = active
         let r = recorder
         live.today = totalsList(r.todayTotals, other: Recorder.gap(r.todayIface, r.todayTotals))
-        // 开机以来：网卡计数从开机起累计，比 NetTick 记到的多出来的就是它没运行的那段
+        // 开机以来：网卡计数从开机起累计，比 NetTick 记到的多出来的就是它没运行的那段。
+        // 这次开机里清除过统计的，从清除那一刻的计数算起
         var missing = Bytes()
         if let nic = lastIface {
-            missing = Bytes(rx: nic.rx > r.bootIface.rx ? nic.rx - r.bootIface.rx : 0,
-                            tx: nic.tx > r.bootIface.tx ? nic.tx - r.bootIface.tx : 0)
+            missing = Bytes(rx: nic.rx, tx: nic.tx).minus(r.bootBase ?? Bytes()).minus(r.bootIface)
         }
         live.sinceBoot = totalsList(r.bootTotals, other: Recorder.gap(r.bootIface, r.bootTotals), unrecorded: missing)
         live.allTime = totalsList(r.allTotals, other: r.allOther)
         live.firstLaunch = r.firstLaunch
+        live.bootCountedFrom = r.bootBase == nil ? nil : r.firstLaunch
         live.available = statsAvailable
         DispatchQueue.main.async { onLive(live) }
     }
@@ -294,6 +296,14 @@ final class Collector: @unchecked Sendable {   // 状态只在 queue 上改
         let now = Date()
         recorder.add(identity, proc: f.proc, d, at: now)
         secondBuckets[Int(now.timeIntervalSince1970), default: [:]][identity.key, default: Bytes()] += d
+    }
+
+    /// 清除统计、从现在重新记（任意线程调用）。completion 在主线程回调，失败时带原因
+    func clearStats(_ completion: @escaping (String?) -> Void) {
+        queue.async { [self] in
+            recorder.reset(nic: lastIface.map { Bytes(rx: $0.rx, tx: $0.tx) }, completion: completion)
+            publish()   // 面板马上归零，不等下一秒
+        }
     }
 
     /// 退出前：把内存里的写进库

@@ -96,7 +96,8 @@ final class RankModel: ObservableObject {
         data.query({ db -> (String?, [AppTotal]) in
             let first = db.firstDay()
             if p == .sinceBoot {
-                let nic = InterfaceCounters.read().map { Bytes(rx: $0.rx, tx: $0.tx) }
+                // 这次开机里清除过统计的，网卡计数从清除那一刻算起
+                let nic = InterfaceCounters.read().map { Bytes(rx: $0.rx, tx: $0.tx).minus(db.bootBaseline() ?? Bytes()) }
                 return (first, db.bootRanking(boot: BootSession.id, nicSinceBoot: nic))
             }
             let r = p.range(firstDay: first)

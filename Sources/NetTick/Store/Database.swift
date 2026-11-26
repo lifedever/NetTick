@@ -96,6 +96,36 @@ final class Database: @unchecked Sendable {   // 只在 Recorder 的 dbQueue 上
         do { try exec("COMMIT") } catch { log("提交失败：\(error.localizedDescription)"); try? exec("ROLLBACK") }
     }
 
+    /// 清掉所有流量记录，同一个事务里写 meta（value 为 nil 的删掉）。
+    /// apps 表留着：认过哪些 App 决定「第一次联网」的通知，清了会把所有 App 再通知一遍
+    func clearStats(meta: [String: String?]) throws {
+        try exec("BEGIN IMMEDIATE")
+        do {
+            try exec("""
+                DELETE FROM daily; DELETE FROM daily_proc; DELETE FROM daily_if;
+                DELETE FROM minute_if; DELETE FROM minute_app; DELETE FROM boot_app; DELETE FROM boot_if;
+                """)
+            for (k, v) in meta {
+                if let v {
+                    setMetaValue(k, v)
+                } else {
+                    prepare("DELETE FROM meta WHERE key = ?")?.bind(k).run()
+                }
+            }
+            try exec("COMMIT")
+        } catch {
+            try? exec("ROLLBACK")
+            throw error
+        }
+        // 删了行文件不会变小，整理一遍，「数据库占用」才跟着降
+        do {
+            try exec("VACUUM")
+            try exec("PRAGMA wal_checkpoint(TRUNCATE)")
+        } catch {
+            log("清除后整理数据库失败：\(error.localizedDescription)")
+        }
+    }
+
     var fileSize: Int64 {
         let fm = FileManager.default
         return [url.path, url.path + "-wal", url.path + "-shm"].reduce(0) { sum, p in

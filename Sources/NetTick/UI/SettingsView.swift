@@ -247,6 +247,9 @@ struct DataSettingsView: View {
         var dbSize: Int64 = 0
     }
     @State private var summary: Summary?
+    @State private var confirmClear = false
+    @State private var clearing = false
+    @State private var clearError: String?
 
     var body: some View {
         Form {
@@ -279,11 +282,40 @@ struct DataSettingsView: View {
                     Text(summary.map { "占用 \(Fmt.bytes(Double($0.dbSize)))" } ?? " ")
                 }
             }
+            Section {
+                LabeledContent {
+                    Button("清除…", role: .destructive) { confirmClear = true }
+                        .disabled(clearing)
+                } label: {
+                    Text("清除统计数据")
+                    if let clearError {
+                        Text("清除失败：\(clearError)").foregroundStyle(.red)
+                    } else {
+                        Text("所有流量记录清零，从现在重新统计。")
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .monospacedDigit()
         .onAppear(perform: load)
+        .confirmationDialog("清除所有统计数据？", isPresented: $confirmClear) {
+            Button("清除", role: .destructive, action: clear)
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("清除后找不回来。")
+        }
+    }
+
+    private func clear() {
+        clearing = true
+        clearError = nil
+        data.clearStats { failure in
+            clearing = false
+            clearError = failure
+            load()
+        }
     }
 
     private func load() {
@@ -291,7 +323,7 @@ struct DataSettingsView: View {
             // 全部时间段的排行：各 App + 「其他」，加起来就是网卡的量（和排行页「全部」一致）
             let rows = db.ranking(from: "0000-01-01", to: "9999-12-31")
             var s = Summary()
-            s.firstLaunch = db.metaValue("first_launch").flatMap(Double.init).map { Date(timeIntervalSince1970: $0) }
+            s.firstLaunch = db.metaValue(MetaKey.firstLaunch).flatMap(Double.init).map { Date(timeIntervalSince1970: $0) }
             for r in rows { s.total += r.bytes }
             s.appCount = rows.filter { $0.identity.kind != .other }.count
             s.dbSize = db.fileSize

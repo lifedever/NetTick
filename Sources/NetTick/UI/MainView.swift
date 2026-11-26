@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 final class MainData: ObservableObject {
     let recorder: Recorder
+    private let collector: Collector
     /// key → 名字、图标路径。每次取内存数据时顺手刷新
     private(set) var identities: [String: AppIdentity] = [:]
 
@@ -12,7 +13,22 @@ final class MainData: ObservableObject {
     lazy var curve = CurveModel(data: self)
     lazy var month = MonthModel(data: self)
 
-    init(recorder: Recorder) { self.recorder = recorder }
+    init(recorder: Recorder, collector: Collector) {
+        self.recorder = recorder
+        self.collector = collector
+    }
+
+    /// 清除统计、从现在重新记。各页跟着重读，切过去不会先闪一下清除前的数。completion 失败时带原因
+    func clearStats(_ completion: @escaping (String?) -> Void) {
+        collector.clearStats { [weak self] failure in
+            if let self {
+                self.rank.load()
+                self.curve.load(keepSelection: false)
+                self.month.load()
+            }
+            completion(failure)
+        }
+    }
 
     func query<T>(_ work: @escaping (Database) -> T, completion: @escaping (T) -> Void) {
         recorder.query(work, completion: completion)
